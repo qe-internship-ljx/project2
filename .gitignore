@@ -1,0 +1,13 @@
+# Generated data exports
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# Data folder
+data/
+
+# Project plan files
+software_ls_project_plan.pdf
+software_ls_project_plan.tex
