@@ -98,19 +98,18 @@ def build_cost_panel(u: "F.Universe" = F.SOFTWARE_SERVICES) -> pd.DataFrame:
             .reset_index())
     mcap = mcap.merge(fx, on=["currency_code", "period"], how="left")
 
-    # Free float (point-in-time monthly snapshot), forward-filled per stock.
+    # Free float (point-in-time snapshot): attach on observation_date so a value
+    # only enters a month-end once it was observable.  The backward as-of join
+    # forward-fills the last observed float, so no separate ffill is needed.
     ff = pd.read_feather(F.DATA_DIR / "fundamental_master.feather",
-                         columns=["stock_id", "date_fundamental", "free_float_percentage"])
+                         columns=["stock_id", "date_fundamental",
+                                  "observation_date", "free_float_percentage"])
     ff["stock_id"] = ff["stock_id"].astype(str)
     ff = ff[ff["stock_id"].isin(universe)].copy()
-    ff["period"] = pd.to_datetime(ff["date_fundamental"]).dt.to_period("M")
-    ff = (ff.sort_values(["stock_id", "period"])
-            .drop_duplicates(["stock_id", "period"], keep="last")
-            [["stock_id", "period", "free_float_percentage"]])
-    mcap = mcap.merge(ff, on=["stock_id", "period"], how="left")
+    ff["date_fundamental"] = pd.to_datetime(ff["date_fundamental"])
+    ff["observation_date"] = pd.to_datetime(ff["observation_date"])
+    mcap = F.attach_pit_fundamentals(mcap, ff)
     mcap = mcap.sort_values(["stock_id", "period"])
-    mcap["free_float_percentage"] = (mcap.groupby("stock_id", observed=True)
-                                         ["free_float_percentage"].ffill())
 
     mff = (mcap["mcap_local"] * mcap["fx_to_usd"]
            * mcap["free_float_percentage"]).clip(lower=MIN_MFF)

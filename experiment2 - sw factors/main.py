@@ -3,8 +3,8 @@ main.py
 =======
 
 Experiment 2 driver: run the full factor pipeline on the **Software & Services**
-cross-section using the *software-industry* factors (``sw_factors.py``,
-plan sections 2.2 and 3.2) instead of the general market factors.
+cross-section using the established *software-industry* factors (``sw_factors.py``,
+plan section 2.2) instead of the general market factors.
 
 Like Experiment 1's per-universe drivers (``banks_insurance.py`` /
 ``commodity_producers.py``) this adds no new analytics.  It reuses Experiment 1's
@@ -19,10 +19,10 @@ Experiment 1's analysis modules bind to their factor library via ``import
 factors as F``.  We register our software-factor library under that name in
 ``sys.modules`` *before* importing them, so their ``F`` resolves to
 ``sw_factors`` -- a clean dependency injection that leaves Experiment 1 wholly
-untouched.  Results land in ``output/``, mirroring the
+untouched.  Results land in ``standard/``, mirroring the
 Experiment 1 layout one-for-one::
 
-    output/
+    standard/
       factor_panel.csv
       quintile/    <factor>/...   + summary.csv + summary_table.png
                                   + long_short_market_alpha.{csv,png}

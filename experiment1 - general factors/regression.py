@@ -16,11 +16,14 @@ factor -- the cross-sectional "factor premium". Outputs, per factor:
       alpha, tstat, r2, n}, the monthly regression diagnostics.
     * ``output/regression/<factor>/beta.png`` -- the beta over time.
     * ``output/quintile/<factor>/long_short.png`` -- a
-      dollar-neutral long-short quintile book whose direction is set by the sign
-      of the factor's full-sample Fama-MacBeth t-stat (t>0: long Q5 / short Q1;
-      t<0: long Q1 / short Q5), and its cumulative growth-of-$1 path over time.
-      The header reports the book's Sharpe ratio and its industry-neutral alpha
-      (with t-stat).
+      dollar-neutral long-short quintile book and its cumulative growth-of-$1
+      path over time.  Its direction follows each factor's canonical literature
+      sign when the factor library opts in (``USE_CANONICAL_LS_DIRECTION``;
+      Experiment 1: long high-bullish factors Q5 / short Q1, else Q1 / short
+      Q5); otherwise it is inferred from the factor's full-sample Fama-MacBeth
+      t-stat (t>0: long Q5 / short Q1; t<0: long Q1 / short Q5).  The header
+      reports the book's Sharpe ratio and its industry-neutral alpha (with
+      t-stat).
 
 A cross-factor ``output/regression/summary.csv`` reports each factor's mean
 monthly beta and its Fama-MacBeth t-statistic (time-series mean of the monthly
@@ -91,11 +94,19 @@ def long_short_portfolio(panel: pd.DataFrame, factor: str,
                          fm_tstat: float) -> tuple[pd.Series, int]:
     """
     Build a dollar-neutral (long-leg minus short-leg) monthly return series for
-    ``factor``, with the trade direction implied by the sign of its Fama-MacBeth
-    t-stat:
+    ``factor`` and return it with the trade sign.  The direction is set one of
+    two ways, depending on the factor library:
 
-        fm_tstat > 0  ->  long top quintile (Q5), short bottom quintile (Q1)
-        fm_tstat < 0  ->  long bottom quintile (Q1), short top quintile (Q5)
+      * Canonical (``F.USE_CANONICAL_LS_DIRECTION`` is truthy -- Experiment 1):
+        the literature-expected direction from ``F.FACTORS[factor]
+        ['higher_is_bullish']`` -- long Q5 / short Q1 if bullish-high, else
+        long Q1 / short Q5.  Independent of the in-sample data.
+
+      * Inferred (attribute absent -- Experiment 2): the sign of the factor's
+        full-sample Fama-MacBeth t-stat::
+
+            fm_tstat > 0  ->  long top quintile (Q5), short bottom quintile (Q1)
+            fm_tstat < 0  ->  long bottom quintile (Q1), short top quintile (Q5)
 
     Each leg is the equal-weighted next-period mean return of its quintile, so
     the spread is the return of a $1-long / $1-short, zero-net-investment book.
@@ -107,7 +118,10 @@ def long_short_portfolio(panel: pd.DataFrame, factor: str,
                .sort_index())
     top, bottom = legs.get(float(N_QUINTILES)), legs.get(1.0)
 
-    sign = -1 if (np.isfinite(fm_tstat) and fm_tstat < 0) else 1
+    if getattr(F, "USE_CANONICAL_LS_DIRECTION", False):
+        sign = 1 if F.FACTORS[factor]["higher_is_bullish"] else -1
+    else:
+        sign = -1 if (np.isfinite(fm_tstat) and fm_tstat < 0) else 1
     spread = (top - bottom) if sign > 0 else (bottom - top)
     return spread.rename(f"{factor}_ls"), sign
 
@@ -122,6 +136,24 @@ def long_short_stats(spread: pd.Series) -> dict:
     sharpe = (mean / sd) * np.sqrt(MONTHS_PER_YEAR) if n > 1 and sd > 0 else np.nan
     return {"mean_monthly": mean, "tstat": tstat, "sharpe": sharpe,
             "ann_return": mean * MONTHS_PER_YEAR, "n_months": n}
+
+
+def beta_neutral_sharpe(spread: pd.Series, market: pd.Series, beta: float) -> float:
+    """
+    Annualised Sharpe of the industry-beta-neutralised book.
+
+    Hedge the long-short book's industry exposure by overlaying a ``-beta``
+    position in the industry ("market") return: ``r_hedged_t = ls_t - beta *
+    industry_t``.  ``beta`` is the exposure estimated by :func:`market_regression`
+    over the relevant window (full sample or 2016+), so the hedged series has
+    (in-sample) zero industry beta and its Sharpe measures risk-adjusted return
+    net of industry risk.  Returns NaN if ``beta`` is not finite.
+    """
+    df = pd.concat([spread.rename("y"), market.rename("x")], axis=1).dropna()
+    if df.empty or not np.isfinite(beta):
+        return np.nan
+    hedged = df["y"] - beta * df["x"]
+    return long_short_stats(hedged)["sharpe"]
 
 
 # --------------------------------------------------------------------------- #
@@ -290,38 +322,57 @@ def render_summary_table(summary: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+def _fmt_pct(x: float) -> str:
+    return f"{x:+.4%}" if np.isfinite(x) else "—"
+
+
+def _fmt_num(x: float, prec: int = 2) -> str:
+    return f"{x:+.{prec}f}" if np.isfinite(x) else "—"
+
+
 def render_alpha_table(rows: pd.DataFrame, path: Path) -> None:
     """
-    Render the per-factor long-short-vs-industry regression as a PNG table:
-    the industry-neutral alpha and its t-stat (with the market beta and R^2 for
-    context).  t-stats are shaded by absolute significance.
+    Render the per-factor long-short-vs-industry regression as a PNG table.
+
+    Full-sample columns: the industry-neutral alpha and its t-stat, the book's
+    annualised Sharpe ratio, its average turnover cost and the industry-beta-
+    neutralised Sharpe (the book hedged with -beta*industry).  A trailing block
+    repeats the alpha, its t-stat, the annualised Sharpe and the beta-neutralised
+    Sharpe estimated on the past decade (2016+) only.  Alpha t-stats are shaded
+    by absolute significance.
     """
     cols = ["factor", "family", "direction",
-            "alpha", "alpha_tstat", "beta", "avg_cost_pp", "r2", "n"]
+            "alpha", "alpha_tstat", "sharpe", "sharpe_neutral", "avg_cost_pp", "n",
+            "alpha_2016", "alpha_tstat_2016", "sharpe_2016", "sharpe_neutral_2016"]
     headers = ["Factor", "Family", "L/S\ndirection",
                "Alpha\n(monthly)", "Alpha\nt-stat",
-               "Industry\nβ", "Avg cost\n(monthly)", "R²", "n"]
+               "Sharpe\n(ann.)", "β-neutral\nSharpe", "Avg cost\n(monthly)", "n",
+               "Alpha\n(2016+)", "Alpha t\n(2016+)", "Sharpe\n(2016+)", "β-neutral\nSh (2016+)"]
 
     cell_text, cell_colors = [], []
     for _, r in rows[cols].iterrows():
         cell_text.append([
             r["factor"], r["family"], r["direction"],
-            f"{r['alpha']:+.4%}", f"{r['alpha_tstat']:+.2f}",
-            f"{r['beta']:+.2f}", f"{-r['avg_cost_pp'] / 100:+.4%}",
-            f"{r['r2']:.2f}", f"{int(r['n'])}",
+            _fmt_pct(r["alpha"]), _fmt_num(r["alpha_tstat"]),
+            _fmt_num(r["sharpe"]), _fmt_num(r["sharpe_neutral"]),
+            f"{-r['avg_cost_pp'] / 100:+.4%}", f"{int(r['n'])}",
+            _fmt_pct(r["alpha_2016"]), _fmt_num(r["alpha_tstat_2016"]),
+            _fmt_num(r["sharpe_2016"]), _fmt_num(r["sharpe_neutral_2016"]),
         ])
         cell_colors.append([
             "white", "white", "white",
             "white", _tstat_color(r["alpha_tstat"]),
-            "white", "#fde7d6", "white", "white",
+            "white", "white", "#fde7d6", "white",
+            "white", _tstat_color(r["alpha_tstat_2016"]), "white", "white",
         ])
 
     n = len(rows)
-    fig, ax = plt.subplots(figsize=(11.5, 0.45 * (n + 1) + 1.4))
+    fig, ax = plt.subplots(figsize=(16.5, 0.45 * (n + 1) + 1.4))
     ax.axis("off")
 
     tbl = ax.table(cellText=cell_text, colLabels=headers, cellColours=cell_colors,
-                   colWidths=[0.16, 0.20, 0.14, 0.12, 0.10, 0.09, 0.10, 0.06, 0.05],
+                   colWidths=[0.13, 0.15, 0.07, 0.075, 0.06, 0.06, 0.078,
+                              0.068, 0.036, 0.075, 0.06, 0.058, 0.09],
                    cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(9)
@@ -336,8 +387,9 @@ def render_alpha_table(rows: pd.DataFrame, path: Path) -> None:
                  "(ls_t = α + β·industry_t + ε;  α = industry-neutral monthly "
                  "return, t-stat tests α ≠ 0)", fontsize=11, y=0.99)
     fig.text(0.5, 0.015, "Shaded alpha t-stats: |t| ≥ 1.65 (10%), darker |t| ≥ 2.0 (5%).  "
-             "Avg cost = mean monthly turnover cost charged to the book (one-way "
-             "cost on traded weight only).",
+             "Sharpe = annualised Sharpe of the L/S book.  Avg cost = mean monthly "
+             "turnover cost (one-way, traded weight only).  2016+ columns re-estimate "
+             "α on the past decade only.",
              ha="center", fontsize=8, color="#555555")
     fig.subplots_adjust(left=0.02, right=0.98, top=0.80, bottom=0.10)
     fig.savefig(path, dpi=150)
@@ -379,10 +431,23 @@ def run(panel: pd.DataFrame | None = None,
         # Fama-MacBeth t-stat, with its return path plotted over time.
         spread, sign = long_short_portfolio(panel, factor, full["fm_tstat"])
         ls = long_short_stats(spread)
+        ls_2016 = long_short_stats(spread[spread.index >= DECADE_START])
 
         # Regress the strategy's monthly return on the industry's monthly return
         # to isolate its industry-neutral alpha (and t-stat).
         mreg = market_regression(spread, industry_ret)
+        # Same regression restricted to the past decade (2016+): its alpha,
+        # alpha t-stat and R^2 (the industry beta is not reported here).
+        mreg_2016 = market_regression(
+            spread[spread.index >= DECADE_START],
+            industry_ret[industry_ret.index >= DECADE_START])
+        # Industry-beta-neutralised Sharpe: hedge the book with -beta * industry,
+        # using the beta estimated over each window (full sample / 2016+).
+        sr_neutral = beta_neutral_sharpe(spread, industry_ret, mreg["beta"])
+        sr_neutral_2016 = beta_neutral_sharpe(
+            spread[spread.index >= DECADE_START],
+            industry_ret[industry_ret.index >= DECADE_START],
+            mreg_2016["beta"])
 
         # Average turnover cost incurred by the book (pp/month).
         avg_cost_pp = cost.average_cost(
@@ -399,8 +464,16 @@ def run(panel: pd.DataFrame | None = None,
             "direction": "Q5-Q1" if sign > 0 else "Q1-Q5",
             "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
             "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
+            "sharpe": ls["sharpe"],
             "avg_cost_pp": avg_cost_pp,
             "r2": mreg["r2"], "n": mreg["n"],
+            "sharpe_neutral": sr_neutral,
+            "alpha_2016": mreg_2016["alpha"],
+            "alpha_tstat_2016": mreg_2016["alpha_tstat"],
+            "sharpe_2016": ls_2016["sharpe"],
+            "sharpe_neutral_2016": sr_neutral_2016,
+            "beta_tstat_2016": mreg_2016["beta_tstat"],
+            "r2_2016": mreg_2016["r2"],
         })
 
         summary_rows.append({

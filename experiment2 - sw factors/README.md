@@ -1,14 +1,20 @@
 # Experiment 2 — Software-industry factors
 
-Tests the **software-tailored factors** of the project plan (§2.2) plus the **two
-novel factors** (§3.2) on the GICS *Software & Services* universe, under the
-**same pipeline as Experiment 1** — even-quintile sorts and monthly
-cross-sectional (Fama–MacBeth) regressions, with the long/short book's Sharpe,
-industry-neutral alpha, and average turnover cost.
+Tests the **established software-tailored factors** of the project plan (§2.2) on
+the GICS *Software & Services* universe, under the **same pipeline as
+Experiment 1** — even-quintile sorts and monthly cross-sectional (Fama–MacBeth)
+regressions, with the long/short book's Sharpe, industry-neutral alpha, and
+average turnover cost.
 
 > The standalone realized-dilution test was dropped per the updated project
 > proposal. The share-count change it measured is still used as one input to
-> `buyback_quality`. Six factors remain.
+> `buyback_quality`. Four established factors remain.
+>
+> The *search for genuinely new* software-industry factors (§3.2) — extrapolating
+> the R&D activity software firms rely on — is pursued in the **R&D-behaviour
+> extension** (`RD/`), a second drop-in factor library. The two ad-hoc "novel"
+> factors of the original proposal (operating-leverage realization, go-to-market
+> efficiency) have been retired in favour of that directed search.
 
 ## Design — maximal reuse, zero duplication of the engine
 
@@ -31,7 +37,7 @@ with **no change to Experiment 1**.
 ```
 sw_factors.py          # software factor library (drop-in for the engine's interface)
 main.py                # driver: wires sw_factors -> 'factors', runs quintile + regression
-output/software_services/
+standard/              # established §2.2 factors (sibling RD/ holds the R&D-behaviour search)
     factor_panel.csv
     quintile/   <factor>/{quintile_returns.csv, quintile_cumulative.png, long_short.png}
                 + summary.csv + long_short_market_alpha.{csv,png}   # alpha table incl. avg cost
@@ -67,15 +73,14 @@ share count: `(1 − shares_t/shares_{t−12m}) − (−buyback_ltm / mcap)`. It
 negative when a firm spends on buybacks that merely offset stock-based-pay grants
 (share count does not fall) — software's characteristic low-quality tell.
 
-**Novel factors (§3.2)**
-
-| Factor | Definition | dir |
-|---|---|---|
-| `operating_leverage` | Δoperating_income (YoY) / Δsales (YoY) | long high |
-| `gtm_efficiency` | Δsales (YoY) / SG&A_ltm | long high |
-
 YoY changes use a 12-month lag, matching the year-over-year convention used
 throughout Experiment 1 (the monthly analogue of the plan's "4 quarters").
+
+**Seeking new software-industry factors (§3.2).** Rather than the two ad-hoc
+novel factors of the original proposal, the search for new signals now follows a
+focused direction — extrapolating the **R&D activity** software firms rely on
+(its growth, conversion into profit, consistency, and composition). That work
+lives in the sibling **`RD/`** library; see `RD/R&D factors.md`.
 
 ## Trading cost
 
@@ -88,35 +93,35 @@ never pays more than one round-trip across its whole holding period. The book's
 **average monthly turnover cost (pp)** is reported as an extra column in the
 `long_short_market_alpha` table.
 
-## Headline results (1998–2025, 336 months)
+## Headline results (1998–2026, 336 months)
 
-Alpha and t(alpha) are from regressing the (sign-oriented) long/short book on the
-industry return; avg cost is the mean monthly turnover cost of that book.
+Alpha and t(alpha) are from regressing the (canonically-signed) long/short book
+on the industry return; avg cost is the mean monthly turnover cost of that book.
 
 | Factor | Gross Q5−Q1/mo | Alpha/mo | t(α) | Avg cost (pp/mo) | FM t (full) | FM t (2016+) |
 |---|---:|---:|---:|---:|---:|---:|
-| buyback_quality | +0.63% | +1.18% | **+5.57** | 0.073 | **+2.62** | **+2.72** |
-| intangible_profitability | +0.56% | +1.32% | **+5.02** | 0.038 | +1.81 | +1.79 |
-| operating_leverage (novel) | +0.33% | +0.62% | **+4.03** | 0.103 | +1.71 | −0.18 |
-| intangible_value | +0.95% | +0.99% | **+3.28** | 0.079 | **+3.14** | −0.19 |
-| gtm_efficiency (novel) | +0.24% | +0.31% | +1.33 | 0.061 | +0.64 | +2.02 |
-| rd_productivity | +0.17%¹ | −0.27% | −1.10 | 0.057 | −0.46 | +2.41 |
-
-¹ raw Q5−Q1; the empirically-signed book is Q1−Q5 (the regression auto-orients).
+| buyback_quality | +0.53% | +1.13% | **+5.16** | 0.075 | +1.38 | +0.60 |
+| intangible_profitability | +0.37% | +1.13% | **+4.07** | 0.039 | +0.71 | +0.66 |
+| intangible_value | +0.66% | +0.71% | **+2.40** | 0.075 | +1.03 | +0.81 |
+| rd_productivity | −0.33% | −0.28% | −1.21 | 0.062 | −0.49 | +1.81 |
 
 **Takeaways.**
-- **Signal is real and survives cost.** `intangible_value`, `buyback_quality`,
-  `intangible_profitability` and the novel `operating_leverage` carry strongly
-  significant **industry-neutral alpha** (t = 3.3–5.6). Because these are
-  fundamental, slow-moving signals, the quintile books turn over little
-  (~0.04–0.10 pp/month round-trip cost), so the cost barely dents the gross
-  premium — unlike fast signals such as short-term reversal in Experiment 1
-  (~0.55 pp/month). The earlier "costs erase everything" read was an artefact of
-  the conservative full-turnover assumption; charging cost on actual turnover
-  shows these factors are economically tradable.
-- **`buyback_quality` is the standout**, with the highest alpha t-stat (5.6),
-  low cost, and the only factor that also holds up *post-2016* (FM t=+2.72) where
-  `intangible_value` fades.
-- **Implication for Experiment 3.** Carry these into the multivariate, cost-aware
-  model for their significant alpha and low mutual correlation; their low natural
-  turnover means the plan's cost-aware position selection costs little to run.
+- **Signal is real and survives cost.** `buyback_quality`,
+  `intangible_profitability` and `intangible_value` carry significant
+  **industry-neutral alpha** (t = 2.4–5.2). Because these are fundamental,
+  slow-moving signals, the quintile books turn over little (~0.04–0.08 pp/month
+  round-trip cost), so the cost barely dents the gross premium — unlike fast
+  signals such as short-term reversal in Experiment 1 (~0.55 pp/month). The
+  earlier "costs erase everything" read was an artefact of the conservative
+  full-turnover assumption; charging cost on actual turnover shows these factors
+  are economically tradable.
+- **`buyback_quality` is the standout**, with the highest alpha t-stat (5.2) and
+  low cost — the one factor that clears Experiment 3's |alpha t|>5 bar under the
+  point-in-time fundamentals.
+- **`rd_productivity` does not work as a level signal** (negative full-sample
+  alpha). The R&D angle is better captured by *behaviour* signals — see the
+  `RD/` extension, where `rd_stability` is the keeper.
+- **Implication for Experiment 3.** Carry `buyback_quality` (and the intangibles)
+  into the multivariate, cost-aware composite for their significant alpha and low
+  mutual correlation; their low natural turnover means the plan's cost-aware
+  position selection costs little to run.

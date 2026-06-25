@@ -60,8 +60,10 @@ SUE_STD_MIN_PERIODS = 6
 WINSOR_PCT = 0.01          # cross-sectional winsorisation before z-scoring
 
 # Ordered list of the factors produced by this module.  ``higher_is_bullish``
-# documents the academically expected sign of the long-leg (top quintile);
-# it is metadata only and does not change any computation.
+# is the academically expected sign of the long-leg (top quintile): True means
+# the canonical trade is long Q5 / short Q1, False means long Q1 / short Q5.
+# It does not affect any factor *value*; it only fixes the long/short book's
+# direction when ``USE_CANONICAL_LS_DIRECTION`` is set (see below).
 FACTORS: dict[str, dict] = {
     "earnings_yield":      {"family": "Value",                 "higher_is_bullish": True},
     "momentum_12m":            {"family": "Momentum",              "higher_is_bullish": True},
@@ -74,6 +76,13 @@ FACTORS: dict[str, dict] = {
     "accruals":            {"family": "Accruals (Sloan)",       "higher_is_bullish": False},
 }
 FACTOR_NAMES = list(FACTORS)
+
+# Long/short book direction.  When True (Experiment 1), the directional L/S book
+# is signed by each factor's canonical literature direction (``higher_is_bullish``
+# above) rather than inferred from the in-sample Fama-MacBeth t-stat.  Factor
+# libraries that omit this attribute (e.g. Experiment 2's ``sw_factors``) keep
+# the t-stat-inferred direction, so this change is scoped to Experiment 1 only.
+USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
@@ -164,16 +173,21 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     """
     Point-in-time monthly fundamentals for the universe.
 
-    ``date_fundamental`` is already a month-end, point-in-time snapshot (it
-    reflects the most recent report observable at that date), so it can be used
-    directly as the as-of date with no look-ahead.
+    Each record carries ``observation_date`` -- the date the underlying report
+    became *observable* (i.e. publicly available).  ``date_fundamental`` is the
+    fiscal-period stamp and, for ~a third of software stock-months, precedes the
+    report's publication, so it cannot be used as the as-of date without
+    look-ahead.  We carry ``observation_date`` (100% populated) and align on it
+    in :func:`build_monthly_panel`.
     """
-    base_cols = ["date_fundamental", "stock_id", "assets",
+    base_cols = ["date_fundamental", "observation_date", "stock_id", "assets",
                  "gross_income_ltm", "earnings_ltm", "operating_cf_ltm"]
     fm = pd.read_feather(DATA_DIR / "fundamental_master.feather", columns=base_cols)
     fm["stock_id"] = fm["stock_id"].astype(str)
     fm = fm[fm["stock_id"].isin(universe)].copy()
 
+    # The extended table has no observation_date; it shares the date_fundamental
+    # grid, so it merges on that key and inherits the observation_date above.
     ext = pd.read_feather(
         DATA_DIR / "Industry Fundamentals Data" / "fundamental_master_extended.feather",
         columns=["date_fundamental", "stock_id", "diluted_shares_outstanding"])
@@ -181,7 +195,39 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     ext = ext[ext["stock_id"].isin(universe)]
 
     fm = fm.merge(ext, on=["stock_id", "date_fundamental"], how="left")
-    return _to_datetime(fm, ["date_fundamental"])
+    return _to_datetime(fm, ["date_fundamental", "observation_date"])
+
+
+def attach_pit_fundamentals(monthly: pd.DataFrame, fund: pd.DataFrame) -> pd.DataFrame:
+    """
+    Attach fundamentals to a monthly ``(stock_id, period)`` panel point-in-time:
+    a record may enter month-end *t* only once it was observable
+    (``observation_date <= t``).  For each stock-month we take the most recently
+    observed report (a backward as-of join on ``observation_date``), which
+    forward-fills the last published figure and leaves months before a stock's
+    first report missing -- removing the look-ahead that aligning on
+    ``date_fundamental`` introduces.
+
+    ``fund`` must carry ``stock_id``, ``observation_date`` and the fundamental
+    columns (plus ``date_fundamental``, used only to break ties).  ``monthly``
+    must carry ``stock_id`` and ``period`` (a monthly ``PeriodIndex`` column).
+    """
+    fund = (fund.dropna(subset=["observation_date"])
+                .sort_values(["stock_id", "observation_date", "date_fundamental"])
+                .drop_duplicates(["stock_id", "observation_date"], keep="last")
+                .drop(columns=["date_fundamental"])
+                .rename(columns={"observation_date": "asof"}))
+
+    # month-end timestamp of each formation period for the as-of comparison
+    monthly = monthly.copy()
+    monthly["asof"] = monthly["period"].dt.to_timestamp(how="end").dt.normalize()
+
+    # merge_asof requires both sides globally sorted on the key.
+    monthly = monthly.sort_values("asof")
+    fund = fund.sort_values("asof")
+    merged = pd.merge_asof(monthly, fund, on="asof", by="stock_id",
+                           direction="backward")
+    return merged.drop(columns=["asof"])
 
 
 # --------------------------------------------------------------------------- #
@@ -214,13 +260,10 @@ def build_monthly_panel(universe: pd.Index | None = None,
     mkt = monthly.groupby("period", observed=True)["mret"].mean().rename("mkt_ret")
     monthly = monthly.merge(mkt, on="period", how="left")
 
-    # Attach point-in-time fundamentals, aligned by calendar month.
+    # Attach point-in-time fundamentals, aligned on observation_date so a report
+    # only enters a month-end once it was actually observable (no look-ahead).
     fund = load_fundamentals(universe)
-    fund["period"] = fund["date_fundamental"].dt.to_period("M")
-    fund = (fund.sort_values(["stock_id", "period"])
-                .drop_duplicates(["stock_id", "period"], keep="last")
-                .drop(columns=["date_fundamental"]))
-    monthly = monthly.merge(fund, on=["stock_id", "period"], how="left")
+    monthly = attach_pit_fundamentals(monthly, fund)
 
     monthly = monthly.sort_values(["stock_id", "period"]).reset_index(drop=True)
     return monthly

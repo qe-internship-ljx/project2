@@ -2,10 +2,10 @@
 sw_factors.py
 =============
 
-Compute the **software-industry factors** of the project plan (sections 2.2 and
-3.2) on the GICS *Software & Services* universe, standardise each cross-
+Compute the **established software-industry factors** of the project plan
+(section 2.2) on the GICS *Software & Services* universe, standardise each cross-
 sectionally (z-score relative to the industry mean), and write a tidy monthly
-panel to ``output/factor_panel.csv``.
+panel to ``standard/factor_panel.csv``.
 
 This is Experiment 2.  It is a *drop-in factor library* for Experiment 1's
 analysis machinery: the heavy lifting -- quintile sorts, cross-sectional
@@ -31,10 +31,10 @@ Established software factors (plan section 2.2):
 (The standalone realized-dilution test was dropped per the updated project
 proposal; buyback_quality retains the share-count change as one of its inputs.)
 
-Novel factors (plan section 3.2):
-
-    operating_leverage       d(operating_income, YoY) / d(sales, YoY)           long high
-    gtm_efficiency           d(sales, YoY) / SG&A_ltm                           long high
+The search for genuinely new software-industry factors (plan section 3.2) is
+pursued separately in the R&D-behaviour extension (``RD/``), which extrapolates
+the R&D activity software firms rely on rather than the two ad-hoc novel factors
+of the original proposal.
 
 ``K_int`` is the intangible (knowledge) capital stock accumulated from past R&D
 by perpetual inventory, ``K_int_t = (1-delta) K_int_{t-1} + R&D_t``
@@ -90,6 +90,7 @@ DATA_DIR = _engine.DATA_DIR
 WINSOR_PCT = _engine.WINSOR_PCT
 load_universe = _engine.load_universe
 load_prices = _engine.load_prices
+attach_pit_fundamentals = _engine.attach_pit_fundamentals   # point-in-time as-of merge on observation_date
 winsorize_cross_section = _engine.winsorize_cross_section
 cross_sectional_zscore = _engine.cross_sectional_zscore
 add_next_return = _engine.add_next_return          # generic: shift(-1) of mret
@@ -101,7 +102,7 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # Paths & configuration
 # --------------------------------------------------------------------------- #
-OUTPUT_DIR = Path(__file__).resolve().parent / "output"
+OUTPUT_DIR = Path(__file__).resolve().parent / "standard"
 
 INDUSTRY_GROUP = "Software & Services"
 
@@ -110,18 +111,24 @@ YOY_LAG = 12                # year-over-year lag (months) for growth / change si
 RD_DEPRECIATION = 0.20      # delta in the K_int perpetual inventory (plan: 0.15-0.30)
 
 # Ordered list of the factors produced by this module.  ``higher_is_bullish``
-# documents the academically expected sign of the long leg (top quintile); it is
-# metadata only (the long/short direction is set empirically by the Fama-MacBeth
-# t-stat sign in regression.py, exactly as in Experiment 1).
+# is the academically expected sign of the long leg (top quintile): True means
+# the canonical trade is long Q5 / short Q1, False means long Q1 / short Q5.  It
+# fixes the long/short book's direction (see ``USE_CANONICAL_LS_DIRECTION``
+# below) and does not affect any factor *value*.
 FACTORS: dict[str, dict] = {
     "intangible_value":         {"family": "Intangible value",            "higher_is_bullish": True},
     "intangible_profitability": {"family": "Intangible quality",          "higher_is_bullish": True},
     "rd_productivity":          {"family": "R&D productivity",            "higher_is_bullish": True},
     "buyback_quality":          {"family": "Buyback quality",             "higher_is_bullish": True},
-    "operating_leverage":       {"family": "Operating leverage (novel)",  "higher_is_bullish": True},
-    "gtm_efficiency":           {"family": "Go-to-market efficiency (novel)", "higher_is_bullish": True},
 }
 FACTOR_NAMES = list(FACTORS)
+
+# Sign the directional long/short book by each factor's canonical literature
+# direction (``higher_is_bullish`` above) rather than inferring it from the
+# in-sample Fama-MacBeth t-stat.  The shared engine (Experiment 1's
+# ``regression.py``) reads this flag off the injected factor library; setting it
+# here applies the expected-direction convention to Experiment 2 as well.
+USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
@@ -130,7 +137,7 @@ FACTOR_NAMES = list(FACTORS)
 # Same cross-section as Experiment 1's default (Software & Services by GICS
 # industry *group*), but writing to *this* experiment's output tree so the two
 # experiments never collide.  Outputs mirror the Experiment 1 layout one-for-one:
-#   output/{factor_panel.csv, quintile/..., regression/...}
+#   standard/{factor_panel.csv, quintile/..., regression/...}
 SOFTWARE_SERVICES = Universe(
     slug="software_services",
     price_file="price_software_services.feather",
@@ -160,18 +167,22 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     Point-in-time monthly fundamentals for the universe, carrying everything the
     software factors need.
 
-    ``date_fundamental`` is already a month-end, point-in-time snapshot (the most
-    recent report observable at that date), so it is used directly as the as-of
-    date with no look-ahead -- identical convention to Experiment 1.
+    Each record carries ``observation_date`` -- when the underlying report became
+    observable.  ``date_fundamental`` is the fiscal-period stamp and can precede
+    publication, so we align on ``observation_date`` in :func:`build_monthly_panel`
+    (via the shared :func:`attach_pit_fundamentals`) to avoid look-ahead --
+    identical convention to Experiment 1.
     """
-    base_cols = ["date_fundamental", "stock_id",
+    base_cols = ["date_fundamental", "observation_date", "stock_id",
                  "assets", "book_value", "sales_ltm", "operating_income_ltm",
                  "sga_ltm", "rd_ltm", "buyback_ltm"]
     fm = pd.read_feather(DATA_DIR / "fundamental_master.feather", columns=base_cols)
     fm["stock_id"] = fm["stock_id"].astype(str)
     fm = fm[fm["stock_id"].isin(universe)].copy()
 
-    # Diluted share count lives in the extended fundamentals table.
+    # Diluted share count lives in the extended fundamentals table.  It has no
+    # observation_date but shares the date_fundamental grid, so it merges on that
+    # key and inherits the observation_date above.
     ext = pd.read_feather(
         DATA_DIR / "Industry Fundamentals Data" / "fundamental_master_extended.feather",
         columns=["date_fundamental", "stock_id", "diluted_shares_outstanding"])
@@ -180,6 +191,7 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
 
     fm = fm.merge(ext, on=["stock_id", "date_fundamental"], how="left")
     fm["date_fundamental"] = pd.to_datetime(fm["date_fundamental"])
+    fm["observation_date"] = pd.to_datetime(fm["observation_date"])
     return fm
 
 
@@ -216,13 +228,10 @@ def build_monthly_panel(universe: pd.Index | None = None,
     mkt = monthly.groupby("period", observed=True)["mret"].mean().rename("mkt_ret")
     monthly = monthly.merge(mkt, on="period", how="left")
 
-    # Attach point-in-time fundamentals, aligned by calendar month.
+    # Attach point-in-time fundamentals, aligned on observation_date so a report
+    # only enters a month-end once it was actually observable (no look-ahead).
     fund = load_fundamentals(universe)
-    fund["period"] = fund["date_fundamental"].dt.to_period("M")
-    fund = (fund.sort_values(["stock_id", "period"])
-                .drop_duplicates(["stock_id", "period"], keep="last")
-                .drop(columns=["date_fundamental"]))
-    monthly = monthly.merge(fund, on=["stock_id", "period"], how="left")
+    monthly = attach_pit_fundamentals(monthly, fund)
 
     monthly = monthly.sort_values(["stock_id", "period"]).reset_index(drop=True)
     return monthly
@@ -304,25 +313,11 @@ def _f_buyback_quality(p: pd.DataFrame) -> pd.Series:
     return realized_reduction - buyback_yield
 
 
-def _f_operating_leverage(p: pd.DataFrame) -> pd.Series:
-    # Realised incremental operating margin: how much of each extra sales dollar
-    # falls through to operating income (software's operating-leverage premise).
-    return _yoy_change(p, "operating_income_ltm") / _yoy_change(p, "sales_ltm")
-
-
-def _f_gtm_efficiency(p: pd.DataFrame) -> pd.Series:
-    # Go-to-market efficiency: revenue added per dollar of operating overhead
-    # (SG&A), favouring efficient acquirers over names burning S&M / admin spend.
-    return _yoy_change(p, "sales_ltm") / p["sga_ltm"]
-
-
 _FACTOR_FUNCS = {
     "intangible_value": _f_intangible_value,
     "intangible_profitability": _f_intangible_profitability,
     "rd_productivity": _f_rd_productivity,
     "buyback_quality": _f_buyback_quality,
-    "operating_leverage": _f_operating_leverage,
-    "gtm_efficiency": _f_gtm_efficiency,
 }
 
 
