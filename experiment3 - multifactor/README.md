@@ -52,7 +52,7 @@ the rest of this section covers the equal-weighted `composite.py`.
 4. **Measure** (Experiment 1's `regression.py` helpers). The Q5−Q1 book is scored
    over the full sample and the past decade (2016+): mean, t-stat, annualised
    Sharpe, the **industry-neutral alpha and its t-stat** (regressing the book on
-   the equal-weighted Software & Services return), the industry beta, and the
+   the market-cap-weighted Software & Services return), the industry beta, and the
    beta-neutralised Sharpe — the same alpha definition as every other long/short
    book in the project.
 
@@ -113,30 +113,34 @@ The first composite: a profitability/quality + capital-discipline + R&D-commitme
 blend. The three constituents are weakly correlated (pairwise z-score correlations
 0.13–0.28), so they carry largely **additive** information.
 
+α below is the industry-neutral alpha against the **market-cap-weighted** Software &
+Services return; the Q5−Q1 spread, t-stat and Sharpe do not reference the benchmark
+and are unchanged.
+
 | Metric | Full sample (1999–2025, 313 mo) | Past decade (2016+, 120 mo) |
 |---|---:|---:|
 | Q5−Q1 mean monthly | +1.105% | +1.042% |
 | t-stat | +4.08 | +2.73 |
 | Sharpe (annualised) | +0.80 | +0.86 |
-| **Industry-neutral α (monthly)** | **+1.390%** | **+1.413%** |
-| **α t-stat** | **+5.69** | **+3.90** |
-| Industry β | −0.30 | −0.29 |
-| β-neutral Sharpe | +1.13 | +1.27 |
+| **Industry-neutral α (monthly)** | **+1.260%** | **+1.213%** |
+| **α t-stat** | **+4.78** | **+3.08** |
+| Industry β | −0.21 | −0.11 |
+| β-neutral Sharpe | +0.94 | +1.02 |
 
 **Takeaways.**
 - **The composite beats every constituent.** Its industry-neutral alpha t-stat
-  (5.69) exceeds each standalone factor's — `buyback_quality` 5.16,
-  `gross_profitability` 5.00, `rd_stability` 3.86 — the diversification benefit of
-  combining weakly-correlated signals (plan §1). The alpha (1.39%/mo) is larger
+  (4.78) exceeds each standalone factor's — `buyback_quality` 3.66,
+  `gross_profitability` 4.33, `rd_stability` 2.75 — the diversification benefit of
+  combining weakly-correlated signals (plan §1). The alpha (1.26%/mo) is larger
   than any single factor's too.
 - **Clean monotonic sort.** Cumulative growth is ordered Q5 > Q4 > Q3 > Q2 > Q1
   across the whole sample (`quintile_cumulative.png`); the ranking power is not a
   tail effect.
 - **Defensive by construction.** The book carries a *negative* industry beta
-  (−0.30) — its quality/stability tilt outperforms in down-industry months — so
-  beta-hedging lifts the Sharpe from 0.80 to **1.13** (full) / **1.27** (2016+).
+  (−0.21) — its quality/stability tilt outperforms in down-industry months — so
+  beta-hedging lifts the Sharpe from 0.80 to **0.94** (full) / **1.02** (2016+).
 - **Robust across the past decade.** The alpha is essentially unchanged in the
-  2016+ re-estimation (1.41%/mo, t = 3.90), not a pre-2010 artifact. (For a strict
+  2016+ re-estimation (1.21%/mo, t = 3.08), not a pre-2010 artifact. (For a strict
   train-on-≤2019 / test-on-2020+ holdout, see the weighted variant below.)
 
 ## Coefficient-weighted variant (out-of-sample) — `weighted_composite.py`
@@ -150,7 +154,7 @@ the split at **in-sample ≤2015 / out-of-sample 2016+** (both configurable via
 
 1. **In-sample premia (≤2015).** Pool every in-sample stock-month and regress the
    **normalised return** — the stock's month-(t+1) return minus that month's
-   equal-weighted industry average (the within-industry "market") — on the
+   market-cap-weighted industry average (the within-industry "market") — on the
    formation-date factor z-scores: `(r_{i,t+1} − market_{t+1}) = a + Σ b_f·z_{f,i,t} + ε`.
    The slopes `b_f` are each factor's in-sample premium, reported with OLS and
    month-clustered t-stats.
@@ -165,36 +169,39 @@ the split at **in-sample ≤2015 / out-of-sample 2016+** (both configurable via
 
 | Term | Coef (= weight, ind-rel %/mo per 1σ) | t (OLS) | t (cluster) |
 |---|---:|---:|---:|
-| intercept | +0.254% | +3.64 | **+2.80** |
-| `buyback_quality` | +0.250% | +3.14 | **+2.18** |
-| `rd_stability` | +0.116% | +1.60 | +1.06 |
+| intercept | +0.787% | +11.05 | **+3.16** |
+| `buyback_quality` | +0.229% | +2.82 | **+1.98** |
+| `rd_stability` | +0.121% | +1.64 | +1.11 |
 
 With `gross_profitability` dropped, `buyback_quality` carries the larger in-sample
-premium (≈2× `rd_stability`); both enter with the expected positive sign.
+premium (≈2× `rd_stability`); both enter with the expected positive sign. (The
+intercept is larger than before because the normalised return is now relative to the
+**market-cap-weighted** — and therefore lower — industry mean; it is dropped from the
+score and does not affect the cross-sectional ranking.)
 
 ### In-sample vs out-of-sample (Q5−Q1 book)
 
 | Metric | In-sample (≤2015, 193 mo) | **Out-of-sample (2016+, 120 mo)** |
 |---|---:|---:|
-| Mean monthly | +0.490% | +0.465% |
-| t-stat | +1.10 | +1.10 |
-| Sharpe (ann.) | +0.27 | +0.35 |
-| Industry-neutral α (monthly) | +0.847% | +1.113% |
-| α t-stat | +2.42 | **+3.22** |
-| Industry β | −0.47 | −0.50 |
-| β-neutral Sharpe | +0.61 | +1.05 |
+| Mean monthly | +0.530% | +0.479% |
+| t-stat | +1.23 | +1.11 |
+| Sharpe (ann.) | +0.31 | +0.35 |
+| Industry-neutral α (monthly) | +0.607% | +0.909% |
+| α t-stat | +1.56 | **+2.13** |
+| Industry β | −0.36 | −0.28 |
+| β-neutral Sharpe | +0.39 | +0.70 |
 
 **Takeaways.**
 - **The weighting generalises here — OOS even beats in-sample.** The industry-
-  neutral α *rises* from 0.85%/mo (t = 2.42) in-sample to 1.11%/mo (t = 3.22) on
+  neutral α *rises* from 0.61%/mo (t = 1.56) in-sample to 0.91%/mo (t = 2.13) on
   the 2016+ holdout. Unlike the earlier `gross_profitability`-dominated 3-factor
   fit, the two-factor weights don't overfit, so they hold up out-of-sample.
-- **A defensive, hedge-then-judge book.** Both windows carry a strongly *negative*
-  industry beta (≈ −0.5): the buyback-quality + R&D-stability tilt does best when
-  the industry falls. The raw mean return is therefore modest (+0.47%/mo, t = 1.10
+- **A defensive, hedge-then-judge book.** Both windows carry a *negative*
+  industry beta (≈ −0.3): the buyback-quality + R&D-stability tilt does best when
+  the industry falls. The raw mean return is therefore modest (+0.48%/mo, t = 1.11
   OOS — the negative beta drags the unhedged return down in a rising industry), but
-  the **industry-neutral** α is large and significant, and β-hedging lifts the OOS
-  Sharpe from 0.35 to **1.05**. This is a book to run market-neutral, not outright.
+  the **industry-neutral** α is significant out-of-sample, and β-hedging lifts the OOS
+  Sharpe from 0.35 to **0.70**. This is a book to run market-neutral, not outright.
 - **Robust split.** Cutting in-sample at 2015 leaves a full 120-month (2016–2025)
   holdout; the dashed line in `quintile_cumulative.png` / `long_short.png` marks
   the IS/OOS boundary.

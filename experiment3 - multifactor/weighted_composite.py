@@ -14,7 +14,7 @@ out-of-sample 2016 onwards.
 
 Step 1 -- in-sample premia.  Pool every in-sample stock-month and regress the
 **normalised return** -- the stock's month-(t+1) return minus that month's
-equal-weighted industry average (the within-industry "market") -- on the
+market-cap-weighted industry average (the within-industry "market") -- on the
 formation-date factor z-scores::
 
     (r_{i,t+1} − market_{t+1})  =  a  +  Σ_f  b_f · z_{f,i,t}  +  ε
@@ -96,21 +96,21 @@ DEFAULT_FACTORS = ["buyback_quality", "rd_stability"]
 def normalized_return() -> pd.DataFrame:
     """
     Per stock-month industry-relative next return: the winsorised month-(t+1)
-    return less that month's equal-weighted Software & Services average, indexed
-    by **formation** month t.
+    return less that month's market-cap-weighted Software & Services average,
+    indexed by **formation** month t.
 
-    Built from Experiment 1's saved panel and engine winsorisation, so the
-    subtracted average equals ``regression.industry_monthly_return`` exactly --
-    the same "market" used for every industry-neutral alpha in the project.
-    Returns ``date, stock_id, norm_return``.
+    The subtracted average is ``regression.industry_monthly_return`` itself -- the
+    same market-cap-weighted "market" used for every industry-neutral alpha in the
+    project -- so the normalised return is industry-relative against an identical
+    benchmark.  Returns ``date, stock_id, norm_return``.
     """
     panel = F.load_panel(u=F.SOFTWARE_SERVICES)
+    industry = R.industry_monthly_return(panel)        # cap-weighted, indexed by date
     uniq = (panel.drop_duplicates(["date", "stock_id"])
                  .dropna(subset=["next_return"]).copy())
     uniq["next_return"] = F.winsorize_cross_section(
         uniq["next_return"], uniq["date"], F.WINSOR_PCT)
-    market = uniq.groupby("date", observed=True)["next_return"].transform("mean")
-    uniq["norm_return"] = uniq["next_return"] - market
+    uniq["norm_return"] = uniq["next_return"] - uniq["date"].map(industry)
     return uniq[["date", "stock_id", "norm_return"]]
 
 

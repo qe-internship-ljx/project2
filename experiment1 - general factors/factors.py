@@ -231,14 +231,83 @@ def attach_pit_fundamentals(monthly: pd.DataFrame, fund: pd.DataFrame) -> pd.Dat
 
 
 # --------------------------------------------------------------------------- #
+# Market-cap weighting (USD)
+# --------------------------------------------------------------------------- #
+def attach_usd_market_cap(monthly: pd.DataFrame) -> pd.DataFrame:
+    """
+    Attach ``security_mcap_usd`` -- the month-end security market cap converted to
+    USD -- to a ``(stock_id, period)`` monthly panel, for use as cross-sectional
+    market-cap weights.
+
+    Local-currency caps are not comparable across this multi-currency universe, so
+    every cap is converted to a common currency: the security's trading currency
+    (``currency_code`` in the security master) and that currency's month-end
+    ``fx_to_usd`` (``value_local * fx_to_usd``) -- the same FX conversion ``cost.py``
+    uses.  ``security_mcap_usd`` is NaN where the cap or its FX rate is missing, so
+    such names drop out of the weighted means.
+    """
+    out = monthly.copy()
+    sm = pd.read_feather(DATA_DIR / "security_master.feather",
+                         columns=["stock_id", "currency_code"])
+    sm["stock_id"] = sm["stock_id"].astype(str)
+    out = out.merge(sm, on="stock_id", how="left")
+
+    fx = pd.read_feather(DATA_DIR / "fx_rates.feather")
+    fx["period"] = pd.to_datetime(fx["date"]).dt.to_period("M")
+    fx = (fx.sort_values("date")
+            .groupby(["currency_code", "period"], observed=True)
+            .agg(fx_to_usd=("fx_to_usd", "last"))
+            .reset_index())
+    out = out.merge(fx, on=["currency_code", "period"], how="left")
+    out["security_mcap_usd"] = out["security_mcap_local"] * out["fx_to_usd"]
+    return out.drop(columns=["currency_code", "fx_to_usd"])
+
+
+def weighted_group_mean(values: pd.Series, weights: pd.Series,
+                        groups: pd.Series) -> pd.Series:
+    """
+    Market-cap-weighted mean ``sum(w*x) / sum(w)`` of ``values`` within each
+    ``groups`` key.
+
+    Rows with a missing value/weight or a non-positive weight are dropped (a name
+    with no market cap cannot sit in a cap-weighted aggregate).  Returns a Series
+    indexed by the group key (a group with no positive-weight observation is NaN).
+    """
+    d = pd.DataFrame({"x": np.asarray(values, dtype=float),
+                      "w": np.asarray(weights, dtype=float),
+                      "g": np.asarray(groups)})
+    d = d[(d["w"] > 0) & np.isfinite(d["x"]) & np.isfinite(d["w"])]
+    num = (d["x"] * d["w"]).groupby(d["g"], observed=True).sum()
+    den = d["w"].groupby(d["g"], observed=True).sum()
+    return num / den.replace(0.0, np.nan)
+
+
+def cap_weighted_market_return(monthly: pd.DataFrame) -> pd.Series:
+    """
+    Market-cap-weighted within-industry ("market") return per period.
+
+    Each stock's month-``t`` return ``mret`` is weighted by its market cap at the
+    **start** of month ``t`` (the prior month-end USD cap), so the weights are
+    known before the return they weight -- the standard look-ahead-free cap-
+    weighted index construction.  Returns a period-indexed Series named
+    ``mkt_ret``.  Requires ``security_mcap_usd`` (see :func:`attach_usd_market_cap`).
+    """
+    df = monthly.sort_values(["stock_id", "period"])
+    w_lag = df.groupby("stock_id", observed=True)["security_mcap_usd"].shift(1)
+    return (weighted_group_mean(df["mret"], w_lag, df["period"])
+            .rename_axis("period").rename("mkt_ret"))
+
+
+# --------------------------------------------------------------------------- #
 # Monthly panel construction
 # --------------------------------------------------------------------------- #
 def build_monthly_panel(universe: pd.Index | None = None,
                         u: Universe = SOFTWARE_SERVICES) -> pd.DataFrame:
     """
     Assemble a (stock_id, period) monthly panel carrying everything the factor
-    functions need: monthly total return, month-end market cap, the equal-
-    weighted universe ("market") return, and the point-in-time fundamentals.
+    functions need: monthly total return, month-end market cap (local and USD),
+    the market-cap-weighted universe ("market") return, and the point-in-time
+    fundamentals.
     """
     if universe is None:
         universe = load_universe(u)
@@ -256,9 +325,11 @@ def build_monthly_panel(universe: pd.Index | None = None,
                  .reset_index())
     monthly["mret"] = monthly["mret"] - 1.0
 
-    # Equal-weighted universe return = within-industry "market" proxy for beta.
-    mkt = monthly.groupby("period", observed=True)["mret"].mean().rename("mkt_ret")
-    monthly = monthly.merge(mkt, on="period", how="left")
+    # USD market cap (the cross-sectional weight) and the market-cap-weighted
+    # universe return = within-industry "market" proxy for beta (weights are the
+    # prior month-end caps, so the index is look-ahead free).
+    monthly = attach_usd_market_cap(monthly)
+    monthly["mkt_ret"] = monthly["period"].map(cap_weighted_market_return(monthly))
 
     # Attach point-in-time fundamentals, aligned on observation_date so a report
     # only enters a month-end once it was actually observable (no look-ahead).
@@ -407,15 +478,18 @@ def add_next_return(panel: pd.DataFrame) -> pd.DataFrame:
 def to_long_panel(panel: pd.DataFrame) -> pd.DataFrame:
     """
     Reshape to one row per (date, stock_id, factor) with the factor value, its
-    z-score, and the next-period return.  Rows with a missing factor value are
-    dropped to keep the file lean.
+    z-score, the next-period return, and the market-cap weight (``weight`` =
+    month-end USD market cap, the formation-date cap used to cap-weight the
+    next-period industry return).  Rows with a missing factor value are dropped to
+    keep the file lean.
     """
     panel = panel.copy()
     panel["date"] = panel["period"].dt.to_timestamp(how="end").dt.normalize()
     frames = []
     for name in FACTOR_NAMES:
-        f = panel[["date", "stock_id", name, f"{name}_z", "next_return"]].copy()
-        f.columns = ["date", "stock_id", "value", "zscore", "next_return"]
+        f = panel[["date", "stock_id", name, f"{name}_z",
+                   "next_return", "security_mcap_usd"]].copy()
+        f.columns = ["date", "stock_id", "value", "zscore", "next_return", "weight"]
         f.insert(2, "factor", name)
         frames.append(f.dropna(subset=["value"]))
     out = pd.concat(frames, ignore_index=True)

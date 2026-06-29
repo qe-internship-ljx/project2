@@ -91,6 +91,9 @@ WINSOR_PCT = _engine.WINSOR_PCT
 load_universe = _engine.load_universe
 load_prices = _engine.load_prices
 attach_pit_fundamentals = _engine.attach_pit_fundamentals   # point-in-time as-of merge on observation_date
+attach_usd_market_cap = _engine.attach_usd_market_cap       # month-end USD market cap (cross-sectional weight)
+cap_weighted_market_return = _engine.cap_weighted_market_return  # cap-weighted within-industry "market" return
+weighted_group_mean = _engine.weighted_group_mean          # used by the injected regression.industry_monthly_return
 winsorize_cross_section = _engine.winsorize_cross_section
 cross_sectional_zscore = _engine.cross_sectional_zscore
 add_next_return = _engine.add_next_return          # generic: shift(-1) of mret
@@ -202,8 +205,8 @@ def build_monthly_panel(universe: pd.Index | None = None,
                         u: Universe = SOFTWARE_SERVICES) -> pd.DataFrame:
     """
     Assemble a (stock_id, period) monthly panel: monthly total return, month-end
-    market cap, the equal-weighted universe ("market") return, and the point-in-
-    time software fundamentals.
+    market cap (local and USD), the market-cap-weighted universe ("market")
+    return, and the point-in-time software fundamentals.
 
     The price->monthly aggregation mirrors Experiment 1's engine so the two
     experiments share an identical return definition and month-end alignment.
@@ -224,9 +227,10 @@ def build_monthly_panel(universe: pd.Index | None = None,
                  .reset_index())
     monthly["mret"] = monthly["mret"] - 1.0
 
-    # Equal-weighted universe return = within-industry "market" proxy.
-    mkt = monthly.groupby("period", observed=True)["mret"].mean().rename("mkt_ret")
-    monthly = monthly.merge(mkt, on="period", how="left")
+    # USD market cap (the cross-sectional weight) and the market-cap-weighted
+    # universe return = within-industry "market" proxy (prior month-end weights).
+    monthly = attach_usd_market_cap(monthly)
+    monthly["mkt_ret"] = monthly["period"].map(cap_weighted_market_return(monthly))
 
     # Attach point-in-time fundamentals, aligned on observation_date so a report
     # only enters a month-end once it was actually observable (no look-ahead).
@@ -343,15 +347,17 @@ def add_zscores(panel: pd.DataFrame) -> pd.DataFrame:
 def to_long_panel(panel: pd.DataFrame) -> pd.DataFrame:
     """
     Reshape to one row per (date, stock_id, factor) with the factor value, its
-    z-score, and the next-period return.  Rows with a missing factor value are
-    dropped to keep the file lean.  Identical schema to Experiment 1.
+    z-score, the next-period return, and the market-cap ``weight`` (month-end USD
+    market cap).  Rows with a missing factor value are dropped to keep the file
+    lean.  Identical schema to Experiment 1.
     """
     panel = panel.copy()
     panel["date"] = panel["period"].dt.to_timestamp(how="end").dt.normalize()
     frames = []
     for name in FACTOR_NAMES:
-        f = panel[["date", "stock_id", name, f"{name}_z", "next_return"]].copy()
-        f.columns = ["date", "stock_id", "value", "zscore", "next_return"]
+        f = panel[["date", "stock_id", name, f"{name}_z",
+                   "next_return", "security_mcap_usd"]].copy()
+        f.columns = ["date", "stock_id", "value", "zscore", "next_return", "weight"]
         f.insert(2, "factor", name)
         frames.append(f.dropna(subset=["value"]))
     out = pd.concat(frames, ignore_index=True)

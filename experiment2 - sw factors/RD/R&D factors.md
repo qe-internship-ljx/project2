@@ -57,7 +57,7 @@ The four behavioral factors each isolate a *different* face of this mis-pricing.
 
 **Definition.** `(gross_income_ltm − gross_income_ltm₍ₜ₋₁₂₎) / sales_ltm₍ₜ₋₁₂₎` — the YoY change in **gross profit**, scaled by prior-year sales (a stable, always-positive base — deliberately **not** `K_int`).
 
-**Predicting logic.** `rd_productivity` asks whether R&D produces *sales* — but in software, sales can be bought with discounting or unprofitable land-grab, so revenue is a weak proxy for value created. The economically decisive question is whether R&D converts into **gross profit**: durable, high-margin, pricing-power output (gross income nets out COGS / hosting). Rewarding margin-accretive innovation and penalising low-margin revenue-chasing is precisely the profit-vs-sales distinction the existing book misses. Notably, **`rd_productivity` printed a *negative* alpha (t ≈ −1.1) in Experiment 2** — consistent with raw sales-per-R&D rewarding the wrong thing; switching the output measure to *profit* is designed to repair that documented failure.
+**Predicting logic.** `rd_productivity` asks whether R&D produces *sales* — but in software, sales can be bought with discounting or unprofitable land-grab, so revenue is a weak proxy for value created. The economically decisive question is whether R&D converts into **gross profit**: durable, high-margin, pricing-power output (gross income nets out COGS / hosting). Rewarding margin-accretive innovation and penalising low-margin revenue-chasing is precisely the profit-vs-sales distinction the existing book misses. Notably, **`rd_productivity` printed a *negative* alpha (t ≈ −1.5) in Experiment 2** — consistent with raw sales-per-R&D rewarding the wrong thing; switching the output measure to *profit* is designed to repair that documented failure.
 
 **Why robust.** Inherits the robustness of the gross-profitability anomaly (Novy-Marx 2013 — gross margin is the least-manipulable profitability line) applied to the innovation-output question, and is built on large, stable accounting lines (lower noise than change/second-difference factors).
 
@@ -121,7 +121,7 @@ Identical machinery to Experiments 1–2, reused **unmodified** via dependency i
 - **Standardisation.** Each factor is winsorised at 1%/99% and z-scored within each month, relative to the industry mean.
 - **Approach 1 — even-quintile sorts.** Five equal-count buckets on the z-score each month; the **next-month** mean return of each, the Q5−Q1 spread, its t-stat and Sharpe.
 - **Approach 2 — Fama–MacBeth.** Monthly cross-sectional OLS of next-month return on the z-score; the time-series mean slope and its FM t-stat (full sample and 2016+).
-- **Industry-neutral alpha.** The signed dollar-neutral long/short book is regressed on the equal-weighted industry return; **α (and t(α)) is the headline** — return not explained by industry exposure. Average monthly **turnover cost** (one-way, charged on traded weight only) is reported alongside.
+- **Industry-neutral alpha.** The signed dollar-neutral long/short book is regressed on the **market-cap-weighted** industry return (each name weighted by its USD market cap); **α (and t(α)) is the headline** — return not explained by industry exposure. Average monthly **turnover cost** (one-way, charged on traded weight only) is reported alongside.
 - **Redundancy.** Experiment 3's panel-agnostic `factor_correlation.run` measures each R&D factor's R² against (a) the 9 Exp1 general factors and (b) the 6 Exp2 software factors; `rd_diagnostics.py` adds the 5×5 cross-correlation among the R&D factors themselves.
 
 Outputs: `RD/{factor_panel.csv, quintile/…, regression/…, factor_correlation/…}`.
@@ -136,13 +136,15 @@ Outputs: `RD/{factor_panel.csv, quintile/…, regression/…, factor_correlation
 
 ![Cross-sectional Fama–MacBeth premia](regression/summary_table.png)
 
+> **Benchmark convention (updated).** α below is now measured against the **market-cap-weighted** industry return (each name weighted by its USD market cap), not the equal-weighted mean of companies. This recalibrates the α's and industry βs versus a mega-cap-dominated benchmark; the gross Q5−Q1 spreads, Fama–MacBeth t-stats, Sharpe and turnover costs do not reference the benchmark and are unchanged. All verdicts below hold.
+
 | Factor | Gross Q5−Q1 /mo | **α /mo** | **t(α)** | FM t (full) | α 2016+ | t(α) 2016+ | FM t 2016+ | Sharpe | Avg cost (pp/mo) |
 |--------|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **`rd_stability`** | +0.49% | **+0.82%** | **+3.86** | **+2.24** | **+1.11%** | **+3.54** | +1.89 | 0.37 | 0.034 |
-| `rd_conversion` | +0.29% | +0.15% | +0.66 | +1.12 | +0.24% | +0.66 | +0.04 | 0.24 | 0.075 |
-| `innovation_mix` | +0.38% | +0.03% | +0.11 | +1.22 | −0.13% | −0.40 | −0.50 | 0.27 | 0.025 |
-| `rd_growth` | −0.07% | −0.38% | −1.39 | −0.88 | −0.24% | −0.66 | +0.11 | −0.05 | 0.068 |
-| `rd_intensity` *(baseline)* | +0.37% | −0.43% | −1.46 | −0.94 | **−0.80%** | **−1.99** | −1.23 | 0.18 | 0.026 |
+| **`rd_stability`** | +0.49% | **+0.67%** | **+2.75** | **+2.24** | **+0.89%** | **+2.51** | +1.89 | 0.37 | 0.034 |
+| `rd_conversion` | +0.29% | +0.13% | +0.58 | +1.12 | +0.04% | +0.11 | +0.04 | 0.24 | 0.075 |
+| `innovation_mix` | +0.38% | +0.07% | +0.26 | +1.22 | −0.20% | −0.61 | −0.50 | 0.27 | 0.025 |
+| `rd_growth` | −0.07% | −0.38% | −1.45 | −0.88 | −0.40% | −1.13 | +0.11 | −0.05 | 0.068 |
+| `rd_intensity` *(baseline)* | +0.37% | −0.26% | −0.81 | −0.94 | −0.76% | −1.76 | −1.23 | 0.18 | 0.026 |
 
 *(α and t(α): industry-neutral monthly alpha of the Q5−Q1 book; FM t: Fama–MacBeth t-stat of the cross-sectional premium. Bold = |t| ≥ ~2.)*
 
@@ -150,27 +152,27 @@ Outputs: `RD/{factor_panel.csv, quintile/…, regression/…, factor_correlation
 
 | Factor | Predicted | Realised (full-sample t(α)) | Verdict |
 |--------|-----------|-----------------------------|---------|
-| `rd_stability` | long high, \|t\| ≈ 1.5–2.5 | **+3.86** (2016+: +3.54) | ✅ **Confirmed & exceeded** — direction right, magnitude *well above* prediction; the standout. |
-| `rd_conversion` | long high, \|t\| ≈ 2.5–3 | +0.66 (FM +1.12) | 🟡 **Partial** — sign correct, magnitude far below prediction; only directionally supportive. |
-| `innovation_mix` | long high, \|t\| ≈ 2 | +0.11 | 🟡 **Partial** — sign correct but ~zero industry-neutral alpha; the raw spread is mostly beta. |
-| `rd_growth` | long high, \|t\| ≈ 2–3 | −1.39 | ❌ **Failed** — wrong sign (mildly negative), insignificant. |
-| `rd_intensity` *(baseline)* | long high, \|t\| ≈ 1–2 (de-rating risk) | −1.46 (2016+: **−1.99**) | ❌ **Reversed** — *as flagged*: significantly **negative** post-2016. |
+| `rd_stability` | long high, \|t\| ≈ 1.5–2.5 | **+2.75** (2016+: +2.51) | ✅ **Confirmed** — direction right, magnitude at the top of the predicted range and significant on every cut; the standout. |
+| `rd_conversion` | long high, \|t\| ≈ 2.5–3 | +0.58 (FM +1.12) | 🟡 **Partial** — sign correct, magnitude far below prediction; only directionally supportive. |
+| `innovation_mix` | long high, \|t\| ≈ 2 | +0.26 | 🟡 **Partial** — sign correct but ~zero industry-neutral alpha; the raw spread is mostly beta. |
+| `rd_growth` | long high, \|t\| ≈ 2–3 | −1.45 | ❌ **Failed** — wrong sign (mildly negative), insignificant. |
+| `rd_intensity` *(baseline)* | long high, \|t\| ≈ 1–2 (de-rating risk) | −0.81 (2016+: −1.76) | ❌ **Reversed** — *as flagged*: negative, and most negative post-2016 (t = −1.76). |
 
 ### 4.3 The one big highlight: `rd_stability` works, and it is the right *kind* of factor
 
-`rd_stability` is the **only** factor here with a significant industry-neutral alpha, and it is significant on every cut: full-sample **t(α) = +3.86** (α = +0.82%/mo), Fama–MacBeth **t = +2.24**, and — unusually for this project — it **strengthens after 2016** (α = +1.11%/mo, **t(α) = +3.54**), where even strong Experiment-2 factors like `intangible_value` fade. Three features make it a genuinely high-quality signal, not a fluke:
+`rd_stability` is the **only** factor here with a significant industry-neutral alpha, and it is significant on every cut: full-sample **t(α) = +2.75** (α = +0.67%/mo), Fama–MacBeth **t = +2.24**, and — unusually for this project — it **strengthens after 2016** (α = +0.89%/mo, **t(α) = +2.51**), where even strong Experiment-2 factors like `intangible_value` fade. Three features make it a genuinely high-quality signal, not a fluke:
 
-1. **Its alpha *exceeds* its gross spread** (+0.82% α vs +0.49% raw Q5−Q1). That can only happen if the book carries *negative* industry beta — i.e. the stable-R&D leg is **defensive**, so hedging the industry *adds* return. By contrast `rd_intensity`, `innovation_mix` and `rd_conversion` all have gross spread > α, meaning their high-R&D long legs load *positively* on the industry and their apparent raw premium is largely beta, not alpha.
-2. **It is cheap to run** — 0.034 pp/month average turnover cost (the 36-month window makes it slow-moving), so the net alpha is ≈ 0.79%/mo. Economically tradable.
+1. **Its alpha *exceeds* its gross spread** (+0.67% α vs +0.49% raw Q5−Q1). That can only happen if the book carries *negative* industry beta (β = −0.24) — i.e. the stable-R&D leg is **defensive**, so hedging the industry *adds* return. By contrast `rd_intensity`, `innovation_mix` and `rd_conversion` all have gross spread > α, meaning their high-R&D long legs load *positively* on the industry and their apparent raw premium is largely beta, not alpha.
+2. **It is cheap to run** — 0.034 pp/month average turnover cost (the 36-month window makes it slow-moving), so the net alpha is ≈ 0.64%/mo. Economically tradable.
 3. **It is distinct** (see §4.5): only ~14% of it is spanned by the general factors and ~19% by the software factors — the rest is new information.
 
 ![rd_stability long/short book](quintile/rd_stability/long_short.png)
 
-We **under-predicted** it: pitched ex-ante as a weak-to-moderate *diversifier* (|t| ≈ 1.5–2.5), it came in as the strongest factor in the set. The interpretation: within an industry where *everyone* spends heavily on R&D, *how reliably* a firm sustains that spend separates disciplined compounders from firms managing earnings via the R&D lever far more sharply than we expected — and the market pays for that discipline, increasingly so post-2016.
+We pitched it ex-ante as a weak-to-moderate *diversifier* (|t| ≈ 1.5–2.5); it landed at the **top of that range** and is the strongest factor in the set. The interpretation: within an industry where *everyone* spends heavily on R&D, *how reliably* a firm sustains that spend separates disciplined compounders from firms managing earnings via the R&D lever — and the market pays for that discipline, increasingly so post-2016.
 
 ### 4.4 The thesis is vindicated by the baseline's failure
 
-The central thesis was *behavior beats level*. The data delivers the cleanest possible confirmation: the **behavioral** consistency factor earns t(α) = +3.86, while the **conventional level** (`rd_intensity`) earns t(α) = −1.46 full-sample and a *significantly negative* **−1.99 post-2016**. Within software, high R&D **spending** is, if anything, a *negative* on an industry-neutral basis recently — exactly the post-2016 de-rating of unprofitable, high-burn software we flagged as the baseline's downside risk. Spending a lot on R&D is not rewarded; spending it *consistently* is. That is the whole point of looking at behavior rather than level.
+The central thesis was *behavior beats level*. The data delivers a clean confirmation: the **behavioral** consistency factor earns t(α) = +2.75, while the **conventional level** (`rd_intensity`) earns t(α) = −0.81 full-sample and its *most negative* reading **−1.76 post-2016** (~10% significance). Within software, high R&D **spending** is, if anything, a *negative* on an industry-neutral basis recently — exactly the post-2016 de-rating of unprofitable, high-burn software we flagged as the baseline's downside risk. Spending a lot on R&D is not rewarded; spending it *consistently* is. That is the whole point of looking at behavior rather than level.
 
 ### 4.5 Distinctness — the "not correlated with existing factors" claim, measured
 
@@ -183,7 +185,7 @@ The central thesis was *behavior beats level*. The data delivers the cleanest po
 
 ### 4.6 Why the two "partials" landed where they did
 
-- **`rd_conversion`** — sign correct and the best-behaved of the non-stability behavior factors (positive raw spread +0.29%/mo, FM t = +1.12, post-2016 Sharpe 0.48), but the industry-neutral alpha is only +0.66 t. It *did* avoid `rd_productivity`'s outright negative result — switching the output measure from sales to gross profit removed the perverse reward to low-margin growth, as designed — but it did not reach the 2.5–3 t we predicted. The profit-conversion premium is real-but-diffuse at monthly frequency in this single industry; lumpy YoY gross-profit changes add noise.
+- **`rd_conversion`** — sign correct and the best-behaved of the non-stability behavior factors (positive raw spread +0.29%/mo, FM t = +1.12, post-2016 Sharpe 0.48), but the industry-neutral alpha is only +0.58 t. It *did* avoid `rd_productivity`'s outright negative result — switching the output measure from sales to gross profit removed the perverse reward to low-margin growth, as designed — but it did not reach the 2.5–3 t we predicted. The profit-conversion premium is real-but-diffuse at monthly frequency in this single industry; lumpy YoY gross-profit changes add noise.
 - **`innovation_mix`** — sign correct, raw spread +0.38%/mo (FM t = +1.22), but ~zero industry-neutral alpha: the build-vs-sell tilt is real in *gross* terms but is almost entirely an industry-beta exposure (R&D-tilted names are higher-beta), so hedging the industry leaves nothing. Consistent with our ex-ante note that its predictive content is a soft quality tilt rather than a sharp alpha source.
 
 ### 4.7 Why `rd_growth` failed
@@ -192,7 +194,7 @@ The Eberhart-type "R&D increase" premium is a *cross-industry* result; **within*
 
 ### 4.8 Robustness / look-ahead audit
 
-Because `rd_stability` is the headline result — and because this project has a documented history of look-ahead bugs — it was put through an **independent adversarial audit** whose explicit mandate was to *refute* it. The verdict was **SURVIVES**.
+Because `rd_stability` is the headline result — and because this project has a documented history of look-ahead bugs — it was put through an **independent adversarial audit** whose explicit mandate was to *refute* it. The verdict was **SURVIVES**. *(The audit was run against the project's then-equal-weighted industry benchmark; its look-ahead and no-artefact findings are properties of the data alignment and quintile composition, invariant to the equal- vs cap-weighted choice of benchmark. Where the audit cites the industry-neutral α/β, the current cap-weighted figures are α = +0.67%/mo, t = 2.75 full and β = −0.24; the equal-weighted audit figures are retained below as reported at the time.)*
 
 - **Look-ahead: clean.** Fundamentals are attached on `observation_date`, not the fiscal `date_fundamental` (which precedes publication 42.5% of the time and *would* leak). Across all 152,612 attached stock-months, **zero** used an observation date later than the month-end it was attached to. The 36-month rolling window is strictly backward-looking; `next_return` is verified to be the realised month *t+1* return (the factor never sees the return it predicts); the z-score is computed within month *t* only.
 - **Not a mechanical artefact.** The stability score correlates **+0.125** with the *number* of distinct R&D updates in the window — i.e. firms that report *more* genuine updates look *more* stable, the **opposite** of a "less-frequent-reporting-looks-smoother" artefact. There is no microcap tilt (the stable long leg holds the *largest* names, median $2.87B, vs $0.52B in the short leg), the spread survives a **size double-sort** (Q5−Q1 = +1.02% / +0.60% / +0.53% per month across size terciles, positive everywhere), and dropout rates are flat across quintiles (no differential survivorship). The fact that **α (+0.87%) exceeds the raw spread (+0.49%)** is legitimate: the book has a genuine *negative* industry beta (−0.33), so hedging the industry cuts residual volatility (3.81% vs 4.52%) and lifts the intercept — exactly how a market-model alpha should behave.
@@ -212,9 +214,9 @@ Because `rd_stability` is the headline result — and because this project has a
 
 The exercise produced **one clear keeper**, one near-miss, and a clean validation of the guiding thesis:
 
-- **Promote `rd_stability` into the multifactor model.** It is significant (t(α) = 3.86), cheap (0.034 pp/mo), distinct (JOINT R² ≤ 0.20), defensive (negative industry beta), and — rare in this project — **post-2016 robust** (t(α) = 3.54). It is the project's first *second-moment* signal and adds a diversification axis the existing book lacks. It belongs alongside `buyback_quality` in Experiment 3's |alpha t| > 5 / low-correlation screen-adjacent set (it clears the alpha-significance and low-correlation bars even if not the strict |t| > 5 cut-off used there).
+- **Promote `rd_stability` into the multifactor model.** It is significant (t(α) = 2.75), cheap (0.034 pp/mo), distinct (JOINT R² ≤ 0.20), defensive (negative industry beta), and — rare in this project — **post-2016 robust** (t(α) = 2.51). It is the project's first *second-moment* signal and adds a diversification axis the existing book lacks. It clears the alpha-significance and low-correlation bars and belongs alongside `buyback_quality` in Experiment 3's factor set (indeed both are constituents of the headline composite there).
 - **Hold `rd_conversion` as a watch-list candidate.** Directionally correct and it repaired `rd_productivity`'s sign; worth re-testing with a longer holding period or combined with `rd_stability`.
-- **Drop `rd_growth` and the `rd_intensity` baseline as standalone signals.** The level/flow of R&D spend is not rewarded within software; `rd_intensity` is *significantly negative* post-2016.
+- **Drop `rd_growth` and the `rd_intensity` baseline as standalone signals.** The level/flow of R&D spend is not rewarded within software; `rd_intensity` is *negative* post-2016 (t = −1.76).
 - **Headline lesson:** in an industry defined by R&D, *how* a company spends — consistently, and converting to margin — carries cross-sectional alpha that *how much* it spends does not. Behavior beats level.
 
 ---

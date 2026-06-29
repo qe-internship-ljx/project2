@@ -277,9 +277,9 @@ def as_factor_panel(composite: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 def industry_return() -> pd.Series:
     """
-    Equal-weighted Software & Services next-period return -- the within-industry
-    "market" -- from Experiment 1's saved panel.  This is the exact series every
-    project long/short book is regressed on for its industry-neutral alpha.
+    Market-cap-weighted Software & Services next-period return -- the within-
+    industry "market" -- from Experiment 1's saved panel.  This is the exact series
+    every project long/short book is regressed on for its industry-neutral alpha.
     """
     return R.industry_monthly_return(F.load_panel(u=F.SOFTWARE_SERVICES))
 
@@ -523,7 +523,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
         windows, "Composite long-short (Q5-Q1) performance",
         f"{_set_label(factor_names)}   |   {meta['n_stocks']} stocks over "
         f"{meta['n_months']} months ({meta['start']:%Y-%m} .. {meta['end']:%Y-%m})   |   "
-        "α from regressing the book on the equal-weighted industry return.   "
+        "α from regressing the book on the market-cap-weighted industry return.   "
         "Shading: |t| ≥ 1.65 (10%), 2.0 (5%).",
         out_dir / "performance.png")
 

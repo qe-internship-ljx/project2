@@ -161,28 +161,31 @@ def beta_neutral_sharpe(spread: pd.Series, market: pd.Series, beta: float) -> fl
 # --------------------------------------------------------------------------- #
 def industry_monthly_return(panel: pd.DataFrame) -> pd.Series:
     """
-    Equal-weighted next-period return of the whole industry cross-section,
+    Market-cap-weighted next-period return of the whole industry cross-section,
     indexed by formation month.
 
     This is the within-industry "market" return.  It is built from the same
     ``next_return`` column the long-short spread is -- including the same
     within-month winsorisation the spread legs get via ``prepare_slice`` -- so
     both series share the formation-date index, the identical (month t+1) return
-    period, and the same tail treatment, and can be regressed directly.
+    period, and the same tail treatment, and can be regressed directly.  Each
+    stock is weighted by its formation-date USD market cap (``weight`` in the
+    panel), which is the cap at the start of the t+1 return period, so the index is
+    look-ahead free; names without a cap drop out of the weighted mean.
     """
     uniq = (panel.drop_duplicates(["date", "stock_id"])
                  .dropna(subset=["next_return"])
                  .copy())
     uniq["next_return"] = F.winsorize_cross_section(
         uniq["next_return"], uniq["date"], F.WINSOR_PCT)
-    return (uniq.groupby("date", observed=True)["next_return"].mean()
-                .sort_index().rename("industry_ret"))
+    return (F.weighted_group_mean(uniq["next_return"], uniq["weight"], uniq["date"])
+                .rename_axis("date").rename("industry_ret").sort_index())
 
 
 def market_regression(spread: pd.Series, market: pd.Series) -> dict:
     """
     Time-series OLS of a long-short strategy's monthly return on the industry's
-    equal-weighted monthly return:
+    market-cap-weighted monthly return:
 
         ls_t = alpha + beta * industry_t + eps_t
 

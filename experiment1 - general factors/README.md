@@ -52,7 +52,7 @@ Each module also accepts a universe slug on the command line, e.g.
 | `momentum_12m` | Momentum | cumulative total return over months `[t-12, t-1]` (skips the most recent month) |
 | `reversal_1m` | Short-term reversal | most recent 1-month total return |
 | `gross_profitability` | Profitability/quality | `gross_income_ltm / assets` (GP/A) |
-| `beta` | Low-risk | 36-month trailing beta vs. the equal-weighted universe return |
+| `beta` | Low-risk | 36-month trailing beta vs. the market-cap-weighted universe return |
 | `asset_growth` | Investment | `assets_t / assets_{t-12m} - 1` |
 | `net_issuance` | Net issuance | diluted-share-count YoY growth |
 | `sue` | Earnings momentum / PEAD | YoY change in LTM earnings, scaled by its trailing std |
@@ -70,16 +70,26 @@ Each module also accepts a universe slug on the command line, e.g.
   and forward-fills the last observed figure, so the join carries no look-ahead.
   Aligning on `date_fundamental` instead would let not-yet-reported earnings into
   the formation date — see `attach_pit_fundamentals` in `factors.py`.
-- **No FX.** Every factor is a ratio or a return and so is currency-neutral.
+- **FX.** Every factor is a ratio or a return and so is currency-neutral, so no
+  FX conversion enters the signals. The market-cap **weights** are not
+  currency-neutral, however, so for the market/industry return each name's cap is
+  converted to USD (`security_mcap_local × fx_to_usd`, the security's trading
+  currency at month-end) before weighting — see `attach_usd_market_cap` in
+  `factors.py`.
+- **Market/industry return.** The within-industry "market" return (the `beta`
+  benchmark and the industry-neutral-alpha benchmark) is **market-cap-weighted**:
+  each name's return is weighted by its USD market cap at the *start* of the
+  return period (the prior month-end cap), so the index is look-ahead free. The
+  quintile portfolio legs themselves remain equal-weighted within each leg.
 - **Winsorisation.** Both the factor (before z-scoring) and `next_return`
   (before averaging/regression) are winsorised at the 1st/99th percentile each
-  month, so extreme microcap moves do not dominate the equal-weighted means.
+  month, so extreme microcap moves do not dominate the cross-sectional means.
 
 ## Long/short books, industry-neutral alpha & trading cost
 
 Each factor's directional dollar-neutral **Q5−Q1 book** is signed by its
 canonical literature direction (`higher_is_bullish` → long Q5 / short Q1, else
-long Q1 / short Q5) and regressed on the equal-weighted industry return:
+long Q1 / short Q5) and regressed on the market-cap-weighted industry return:
 
 ```
 ls_t = α + β·industry_t + ε_t
@@ -104,32 +114,35 @@ Each factor's canonically-signed Q5−Q1 book regressed on the industry return.
 turnover cost; FM t is the Fama–MacBeth t-stat of the cross-sectional premium
 (from `regression/summary.csv`). Sorted by `α` t-stat.
 
+α is now measured against the **market-cap-weighted** industry return; the turnover
+cost and Fama–MacBeth t-stats do not reference the benchmark and are unchanged.
+
 | Factor | L/S dir | α/mo | α t-stat | Avg cost (pp/mo) | FM t (full) |
 |---|:--:|---:|---:|---:|---:|
-| `gross_profitability` | Q5−Q1 | +1.25% | **+5.00** | 0.037 | +3.83 |
-| `net_issuance` | Q1−Q5 | +0.95% | **+4.55** | 0.081 | −3.15 |
-| `earnings_yield` | Q5−Q1 | +1.13% | **+4.34** | 0.066 | −1.04 |
-| `beta` | Q1−Q5 | +0.89% | **+3.66** | 0.068 | −0.13 |
-| `sue` | Q5−Q1 | +0.57% | **+2.84** | 0.101 | +1.17 |
-| `momentum_12m` | Q5−Q1 | +0.84% | +2.18 | 0.164 | +1.12 |
-| `accruals` | Q1−Q5 | +0.36% | +1.72 | 0.079 | −1.34 |
-| `asset_growth` | Q1−Q5 | +0.45% | +1.62 | 0.087 | −1.99 |
-| `reversal_1m` | Q1−Q5 | +0.27% | +0.78 | 0.580 | −1.74 |
+| `gross_profitability` | Q5−Q1 | +1.13% | **+4.33** | 0.037 | +3.83 |
+| `net_issuance` | Q1−Q5 | +0.78% | **+3.33** | 0.081 | −3.15 |
+| `earnings_yield` | Q5−Q1 | +0.81% | **+2.52** | 0.066 | −1.04 |
+| `accruals` | Q1−Q5 | +0.48% | **+2.17** | 0.079 | −1.34 |
+| `asset_growth` | Q1−Q5 | +0.52% | +1.91 | 0.087 | −1.99 |
+| `momentum_12m` | Q5−Q1 | +0.73% | +1.85 | 0.164 | +1.12 |
+| `sue` | Q5−Q1 | +0.41% | +1.85 | 0.101 | +1.17 |
+| `beta` | Q1−Q5 | +0.44% | +1.54 | 0.070 | +0.83 |
+| `reversal_1m` | Q1−Q5 | +0.28% | +0.83 | 0.581 | −1.74 |
 
 **Takeaways.**
 - **Quality, capital-discipline and value lead.** `gross_profitability`,
-  `net_issuance` (long low issuance), `earnings_yield` and low `beta` all carry
-  significant industry-neutral alpha (t = 3.7–5.0) at low turnover cost
+  `net_issuance` (long low issuance), `earnings_yield` and `accruals` all carry
+  significant industry-neutral alpha (t = 2.2–4.3) at low turnover cost
   (~0.04–0.08 pp/month round-trip), so the cost barely dents the gross premium.
 - **Fast signals pay for it.** `reversal_1m` is the only book with material
   turnover cost (~0.58 pp/month) — it rebalances almost entirely each month — and
   its alpha is insignificant once that is charged.
 - **The alpha sign follows the trade, not the premium.** Several factors with a
-  negative Fama–MacBeth premium (`net_issuance`, `asset_growth`, `accruals`,
-  low `beta`) are traded in their canonical low-minus-high direction, so the
+  negative Fama–MacBeth premium (`net_issuance`, `asset_growth`, `accruals`)
+  are traded in their canonical low-minus-high direction, so the
   signed book's alpha is positive — the two columns are consistent, not in
   conflict.
-- **Carried into Experiment 3.** `gross_profitability` (alpha t = 5.0) is one of
+- **Carried into Experiment 3.** `gross_profitability` (alpha t = 4.3) is one of
   the constituents of the multifactor composite; the others come from the
   software-specific factors of Experiment 2.
 

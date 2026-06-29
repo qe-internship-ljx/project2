@@ -11,3 +11,7 @@ data/
 # Project plan files
 software_ls_project_plan.pdf
 software_ls_project_plan.tex
+
+# PDF and HTML files
+*.pdf
+*.html
