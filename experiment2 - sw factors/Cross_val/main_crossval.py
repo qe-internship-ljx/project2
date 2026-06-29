@@ -108,7 +108,8 @@ def run_correlation_analysis() -> None:
         fc.run(target_factor=factor,
                target_panel=target_panel,
                market_panel=general_panel,
-               out_dir=corr_root / "vs_general" / factor)
+               out_dir=corr_root / "vs_general" / factor,
+               include_market_cap=True)
 
 
 def main() -> None:

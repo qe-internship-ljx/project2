@@ -74,6 +74,8 @@ TARGET_PANEL = EXP2_DIR / "output" / "factor_panel.csv"
 MARKET_ALPHA = EXP1_DIR / "output" / "software" / "quintile" / "long_short_market_alpha.csv"
 
 REGRESSOR_COL = "zscore"        # project convention: factors are z-scores vs the industry mean
+WINSOR_PCT = 0.01               # cross-sectional winsorisation before z-scoring (mirrors factors.py)
+SIZE_FACTOR_LABEL = "log_market_cap"   # row name for the market-cap (size) exposure
 
 
 # --------------------------------------------------------------------------- #
@@ -89,6 +91,39 @@ def _load_exposures(panel_path: Path, regressor_col: str) -> pd.DataFrame:
     panel["stock_id"] = panel["stock_id"].astype(str)
     return panel.pivot_table(index=["date", "stock_id"],
                              columns="factor", values=regressor_col)
+
+
+def _market_cap_zscore(panel_path: Path, winsor: float = WINSOR_PCT) -> pd.Series:
+    """
+    Cross-sectional z-score of **log** market cap, from a panel's ``weight``
+    column (= formation-date month-end USD market cap, identical across factor
+    rows for a given date/stock).
+
+    Log is taken first because raw market cap is extremely right-skewed -- a raw
+    z-score would be dominated by a handful of mega-caps; log size is the standard
+    size exposure.  It is then winsorised per date at ``[winsor, 1-winsor]`` and
+    standardised, matching the project's ``cross_sectional_zscore`` convention.
+
+    Returns a Series indexed by ``(date, stock_id)`` named ``log_market_cap``.
+    """
+    raw = pd.read_csv(panel_path, parse_dates=["date"],
+                      usecols=["date", "stock_id", "weight"])
+    raw["stock_id"] = raw["stock_id"].astype(str)
+    # weight is identical across a stock-month's factor rows -> one row per key.
+    cap = (raw.dropna(subset=["weight"])
+              .drop_duplicates(["date", "stock_id"])
+              .set_index(["date", "stock_id"])["weight"])
+    cap = cap[cap > 0]
+    logcap = np.log(cap)
+
+    grp = logcap.groupby(level="date")
+    lo = grp.transform(lambda s: s.quantile(winsor))
+    hi = grp.transform(lambda s: s.quantile(1.0 - winsor))
+    clipped = logcap.clip(lower=lo, upper=hi)
+    cgrp = clipped.groupby(level="date")
+    z = (clipped - cgrp.transform("mean")) / cgrp.transform("std").replace(0.0, np.nan)
+    z.name = SIZE_FACTOR_LABEL
+    return z
 
 
 def _market_families() -> dict[str, str]:
@@ -142,7 +177,8 @@ def factor_r2_table(target_factor: str,
                     target_panel: Path = TARGET_PANEL,
                     market_panel: Path = MARKET_PANEL,
                     regressor_col: str = REGRESSOR_COL,
-                    market_factors: list[str] | None = None) -> pd.DataFrame:
+                    market_factors: list[str] | None = None,
+                    include_market_cap: bool = False) -> pd.DataFrame:
     """
     Build the R-squared table associating ``target_factor`` with each general
     market factor.
@@ -154,11 +190,17 @@ def factor_r2_table(target_factor: str,
     market_panel  : panel holding the general market factors.
     regressor_col : exposure column to use (default ``"zscore"``).
     market_factors: which market factors to test; default = all in ``market_panel``.
+    include_market_cap : if True, append an extra ``log_market_cap`` row giving
+        the target factor's association with the z-score of log USD market cap
+        (size), computed from the target panel's ``weight`` column.  This row is
+        purely informational -- it is *not* added to the JOINT multivariate fit,
+        so the documented joint-redundancy numbers are unchanged.
 
     Returns one row per market factor (n, corr, R^2, slope), sorted by
-    descending R^2, plus a final ``__joint__`` row carrying the multivariate
-    R^2 of the target on all tested market factors together.  ``family`` is
-    filled from Exp 1's alpha table when available.
+    descending R^2, optionally followed by the ``log_market_cap`` row, plus a
+    final ``__joint__`` row carrying the multivariate R^2 of the target on all
+    tested market factors together.  ``family`` is filled from Exp 1's alpha
+    table when available.
     """
     target_wide = _load_exposures(target_panel, regressor_col)
     market_wide = _load_exposures(market_panel, regressor_col)
@@ -191,10 +233,23 @@ def factor_r2_table(target_factor: str,
              .sort_values("r2", ascending=False, na_position="last")
              .reset_index(drop=True))
 
+    extra_rows = []
+    if include_market_cap:
+        size_z = _market_cap_zscore(target_panel)
+        # Align target exposure with size over their own shared coverage.
+        pair = pd.concat([target_wide[target_factor].rename("y"),
+                          size_z.rename("x")], axis=1, join="inner")
+        s_corr, s_r2, s_slope, s_n = _univariate_r2(pair["y"].to_numpy(),
+                                                    pair["x"].to_numpy())
+        extra_rows.append({"market_factor": SIZE_FACTOR_LABEL,
+                           "family": "size (market cap)", "n_obs": s_n,
+                           "corr": s_corr, "r2": s_r2, "slope": s_slope})
+
     joint_r2, joint_n = _joint_r2(y, joined[market_factors].to_numpy())
     joint_row = {"market_factor": "__joint__", "family": "all market factors",
                  "n_obs": joint_n, "corr": np.nan, "r2": joint_r2, "slope": np.nan}
-    table = pd.concat([table, pd.DataFrame([joint_row])], ignore_index=True)
+    table = pd.concat([table, pd.DataFrame(extra_rows + [joint_row])],
+                      ignore_index=True)
     table.attrs["target_factor"] = target_factor
     table.attrs["regressor_col"] = regressor_col
     return table
@@ -241,12 +296,16 @@ def render_r2_table(table: pd.DataFrame, path: Path) -> None:
     for j in range(len(headers)):
         tbl[0, j].set_text_props(weight="bold", color="white")
         tbl[0, j].set_facecolor("#404040")
+    has_size = (table["market_factor"] == SIZE_FACTOR_LABEL).any()
     for i in range(1, n + 1):
         tbl[i, 0].set_text_props(ha="left")
         tbl[i, 1].set_text_props(ha="left")
         if cell_text[i - 1][0].startswith("JOINT"):
             for j in range(len(headers)):
                 tbl[i, j].set_text_props(weight="bold")
+        elif cell_text[i - 1][0] == SIZE_FACTOR_LABEL:
+            for j in range(len(headers)):
+                tbl[i, j].set_text_props(style="italic")
 
     unit = "z-score" if regressor == "zscore" else regressor
     fig.suptitle(
@@ -254,10 +313,12 @@ def render_r2_table(table: pd.DataFrame, path: Path) -> None:
         f"R² of OLS  {target}({unit}) ~ market factor({unit})   "
         "(single regressor: R² = corr²)",
         fontsize=11, y=0.99)
+    size_note = ("  log_market_cap = z-score of log USD market cap (size), "
+                 "informational, not in JOINT." if has_size else "")
     fig.text(0.5, 0.04,
              "R² = fraction of the target factor's cross-sectional variation linearly "
              "explained.  JOINT = multivariate fit on all factors.\n"
-             "Shading: R² ≥ 0.03, 0.10, 0.25.",
+             "Shading: R² ≥ 0.03, 0.10, 0.25." + size_note,
              ha="center", fontsize=8, color="#555555")
     fig.subplots_adjust(left=0.02, right=0.98, top=0.84, bottom=0.13)
     fig.savefig(path, dpi=150)
@@ -272,17 +333,19 @@ def run(target_factor: str = "buyback_quality",
         market_panel: Path = MARKET_PANEL,
         regressor_col: str = REGRESSOR_COL,
         market_factors: list[str] | None = None,
-        out_dir: Path | None = None) -> pd.DataFrame:
+        out_dir: Path | None = None,
+        include_market_cap: bool = False) -> pd.DataFrame:
     """
     Compute the R^2 table for ``target_factor`` and write ``r2_table.csv`` and
     ``r2_table.png`` under ``out_dir`` (default ``OUTPUT_DIR/<target_factor>``).
+    Set ``include_market_cap=True`` to append the ``log_market_cap`` (size) row.
     Returns the table.
     """
     out_dir = (OUTPUT_DIR / target_factor) if out_dir is None else out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     table = factor_r2_table(target_factor, target_panel, market_panel,
-                            regressor_col, market_factors)
+                            regressor_col, market_factors, include_market_cap)
     table.to_csv(out_dir / "r2_table.csv", index=False)
     render_r2_table(table, out_dir / "r2_table.png")
 

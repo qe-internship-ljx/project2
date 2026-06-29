@@ -46,8 +46,11 @@ The constituent loading (``load_exposures``), the score → tidy-panel shaping
 ``quintile.py``), the industry-neutral alpha and window-split performance
 (``industry_return`` / ``book_stats``, Experiment 1's ``regression.py``), and the
 plotting / table rendering (``plot_cumulative`` / ``plot_long_short`` /
-``render_performance``) are all imported from ``composite.py``.  This module adds
-**only** the in-sample premium regression and the train/test split.
+``render_performance``) are all imported from ``composite.py``.  The dependent
+variable (``regression.normalized_return``) and the pooled month-clustered OLS
+(``regression.pooled_ols``) are reused from Experiment 1's ``regression.py`` -- the
+same spine that powers the pooled normalised-return regression in Experiments 1 &
+2.  This module adds **only** the in-sample window and the train/test split.
 
 Outputs (``output/weighted/<slug>/``)
 -------------------------------------
@@ -65,14 +68,12 @@ Run standalone::
 
 from __future__ import annotations
 
-import math
 import sys
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 import composite as C
@@ -91,86 +92,14 @@ DEFAULT_FACTORS = ["buyback_quality", "rd_stability"]
 
 
 # --------------------------------------------------------------------------- #
-# Step 1a -- dependent variable: normalised (industry-relative) return
+# Step 1 -- in-sample premia
+#
+# The dependent variable (industry-relative return, ``R.normalized_return``) and
+# the pooled month-clustered OLS (``R.pooled_ols``) both live in Experiment 1's
+# ``regression.py`` -- the same reusable spine that powers the pooled
+# normalised-return regression added to Experiments 1 & 2.  This module only
+# supplies the in-sample window and turns the slopes into composite weights.
 # --------------------------------------------------------------------------- #
-def normalized_return() -> pd.DataFrame:
-    """
-    Per stock-month industry-relative next return: the winsorised month-(t+1)
-    return less that month's market-cap-weighted Software & Services average,
-    indexed by **formation** month t.
-
-    The subtracted average is ``regression.industry_monthly_return`` itself -- the
-    same market-cap-weighted "market" used for every industry-neutral alpha in the
-    project -- so the normalised return is industry-relative against an identical
-    benchmark.  Returns ``date, stock_id, norm_return``.
-    """
-    panel = F.load_panel(u=F.SOFTWARE_SERVICES)
-    industry = R.industry_monthly_return(panel)        # cap-weighted, indexed by date
-    uniq = (panel.drop_duplicates(["date", "stock_id"])
-                 .dropna(subset=["next_return"]).copy())
-    uniq["next_return"] = F.winsorize_cross_section(
-        uniq["next_return"], uniq["date"], F.WINSOR_PCT)
-    uniq["norm_return"] = uniq["next_return"] - uniq["date"].map(industry)
-    return uniq[["date", "stock_id", "norm_return"]]
-
-
-# --------------------------------------------------------------------------- #
-# Step 1b -- pooled OLS with OLS and month-clustered t-stats
-# --------------------------------------------------------------------------- #
-def _norm_cdf(x: float) -> float:
-    """Standard-normal CDF (large-sample p-values for the clustered t-stats)."""
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-
-def pooled_ols(y: np.ndarray, X: np.ndarray, clusters: np.ndarray,
-               factor_names: list[str]) -> pd.DataFrame:
-    """
-    Pooled OLS of ``y`` on ``[1, X]`` with homoskedastic-OLS and cluster-robust
-    (CR1, clustered on ``clusters`` = month) standard errors.
-
-    Clustering by month is the appropriate standard error for a pooled
-    cross-section of returns -- same-month residuals are cross-sectionally
-    correlated, which plain OLS ignores.  Returns one row per term (intercept +
-    factors) with coef, both SEs / t-stats, and a normal-approx clustered p-value.
-    """
-    y = np.asarray(y, dtype=float)
-    Xf = np.asarray(X, dtype=float)
-    n, k = Xf.shape
-    Xd = np.column_stack([np.ones(n), Xf])            # design: intercept + factors
-    p = k + 1
-
-    XtX_inv = np.linalg.pinv(Xd.T @ Xd)
-    beta = XtX_inv @ (Xd.T @ y)
-    resid = y - Xd @ beta
-
-    # Homoskedastic (classical OLS) covariance.
-    sigma2 = (resid @ resid) / (n - p)
-    se_ols = np.sqrt(np.diag(sigma2 * XtX_inv))
-
-    # Cluster-robust (CR1) covariance, clustered by month.
-    meat = np.zeros((p, p))
-    groups = pd.Series(np.arange(n)).groupby(np.asarray(clusters)).groups
-    for idx in groups.values():
-        rows = np.asarray(idx)
-        s = Xd[rows].T @ resid[rows]                  # cluster score sum
-        meat += np.outer(s, s)
-    G = len(groups)
-    correction = (G / (G - 1)) * ((n - 1) / (n - p)) if G > 1 else 1.0
-    se_cl = np.sqrt(np.diag(correction * (XtX_inv @ meat @ XtX_inv)))
-
-    t_ols = beta / se_ols
-    t_cl = beta / se_cl
-    p_cl = [2.0 * (1.0 - _norm_cdf(abs(t))) if np.isfinite(t) else np.nan for t in t_cl]
-
-    return pd.DataFrame({
-        "term": ["intercept"] + list(factor_names),
-        "coef": beta,
-        "se_ols": se_ols, "t_ols": t_ols,
-        "se_cluster": se_cl, "t_cluster": t_cl, "p_cluster": p_cl,
-        "n_obs": n, "n_clusters_months": G,
-    })
-
-
 def fit_weights(resolved: pd.DataFrame, exposures: pd.DataFrame,
                 is_end: pd.Timestamp = IS_END) -> tuple[pd.DataFrame, pd.Series, int, int]:
     """
@@ -182,12 +111,13 @@ def fit_weights(resolved: pd.DataFrame, exposures: pd.DataFrame,
     weight the composite.
     """
     names = resolved["factor"].tolist()
-    y = normalized_return().set_index(["date", "stock_id"])["norm_return"]
+    panel = F.load_panel(u=F.SOFTWARE_SERVICES)
+    y = R.normalized_return(panel).set_index(["date", "stock_id"])["norm_return"]
     fit = exposures.join(y, how="inner").dropna()
     fit = fit[fit.index.get_level_values("date") <= is_end]
 
-    coef = pooled_ols(fit["norm_return"].to_numpy(), fit[names].to_numpy(),
-                      fit.index.get_level_values("date").to_numpy(), names)
+    coef = R.pooled_ols(fit["norm_return"].to_numpy(), fit[names].to_numpy(),
+                        fit.index.get_level_values("date").to_numpy(), names)
     weights = coef.set_index("term").loc[names, "coef"]
     n_months = fit.index.get_level_values("date").nunique()
     return coef, weights, len(fit), n_months

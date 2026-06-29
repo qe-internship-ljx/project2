@@ -10,7 +10,19 @@ of all securities on the factor z-score via OLS:
     next_return_i = alpha_t + beta_t * zscore_i + eps_i
 
 Re-estimating every month gives one time series of slopes (``beta_t``) per
-factor -- the cross-sectional "factor premium". Outputs, per factor:
+factor -- the cross-sectional "factor premium".
+
+Alongside this per-month view, a single **pooled** regression complements it: the
+**industry-relative** return (each stock's month-t+1 return minus the cap-weighted
+industry return -- :func:`normalized_return`) regressed on the factor z-score over
+**every stock-month at once** (pooled over both time and the cross section), with
+month-clustered standard errors.  Where the monthly slopes answer "how does the
+premium move over time", the pooled slope answers "what is the factor's average
+industry-relative payoff per 1 sigma across the whole panel".  The
+``normalized_return`` / ``pooled_ols`` helpers are reusable -- Experiment 3's
+coefficient-weighted composite consumes them directly.
+
+Outputs, per factor:
 
     * ``output/regression/<factor>/regression.csv`` -- months x {beta,
       alpha, tstat, r2, n}, the monthly regression diagnostics.
@@ -28,7 +40,10 @@ factor -- the cross-sectional "factor premium". Outputs, per factor:
 A cross-factor ``output/regression/summary.csv`` reports each factor's mean
 monthly beta and its Fama-MacBeth t-statistic (time-series mean of the monthly
 betas divided by its standard error), plus the directional long-short book's
-mean return, t-stat and annualised return.  The
+mean return, t-stat and annualised return.  A companion
+``output/regression/normalized_regression.csv`` (+ ``..._table.png``) reports the
+pooled time-and-cross-section slope of the industry-relative return on each factor
+z-score, with OLS and month-clustered t-stats (full sample and 2016+).  The
 ``output/quintile/long_short_market_alpha`` table additionally carries each
 book's industry-neutral alpha and its **average turnover cost** (pp/month).
 
@@ -39,6 +54,7 @@ Run standalone::
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import matplotlib
@@ -220,6 +236,130 @@ def market_regression(spread: pd.Series, market: pd.Series) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Normalised (industry-relative) return + pooled time-and-cross-section
+# regression
+#
+# The monthly regressions above re-estimate one slope per month and Fama-MacBeth
+# the series ("beta over time").  These helpers add the complementary view: a
+# single pooled regression of the **industry-relative** return on the factor
+# z-score across every stock-month at once (pooled over both time and the cross
+# section), clustered by month.  ``normalized_return`` and ``pooled_ols`` are the
+# reusable spine -- Experiment 3's coefficient-weighted composite consumes them
+# directly instead of re-implementing its own.
+# --------------------------------------------------------------------------- #
+def normalized_return(panel: pd.DataFrame,
+                      industry_ret: pd.Series | None = None) -> pd.DataFrame:
+    """
+    Per stock-month industry-relative next return -- the winsorised month-(t+1)
+    return less that month's market-cap-weighted industry average -- indexed by
+    formation month ``t``.  Returns ``date, stock_id, norm_return``.
+
+    The subtracted average is :func:`industry_monthly_return` (cap-weighted), the
+    same within-industry "market" used for every industry-neutral alpha in the
+    project, so the normalised return is industry-relative against an identical
+    benchmark.  ``next_return`` is winsorised within each month at ``F.WINSOR_PCT``
+    -- the project's standard tail treatment, the same clip :func:`prepare_slice`
+    applies -- before the industry mean is removed.  Pass a precomputed
+    ``industry_ret`` (e.g. the one :func:`run` already built) to skip recomputing
+    it.
+
+    Reusable across experiments: Experiment 3's ``weighted_composite`` uses this
+    as the dependent variable of its in-sample premium regression.
+    """
+    if industry_ret is None:
+        industry_ret = industry_monthly_return(panel)
+    uniq = (panel.drop_duplicates(["date", "stock_id"])
+                 .dropna(subset=["next_return"]).copy())
+    uniq["next_return"] = F.winsorize_cross_section(
+        uniq["next_return"], uniq["date"], F.WINSOR_PCT)
+    uniq["norm_return"] = uniq["next_return"] - uniq["date"].map(industry_ret)
+    return uniq[["date", "stock_id", "norm_return"]]
+
+
+def _norm_cdf(x: float) -> float:
+    """Standard-normal CDF (large-sample p-values for the clustered t-stats)."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def pooled_ols(y: np.ndarray, X: np.ndarray, clusters: np.ndarray,
+               factor_names: list[str]) -> pd.DataFrame:
+    """
+    Pooled OLS of ``y`` on ``[1, X]`` with homoskedastic-OLS and cluster-robust
+    (CR1, clustered on ``clusters`` = month) standard errors.
+
+    Clustering by month is the appropriate standard error for a pooled
+    cross-section of returns -- same-month residuals are cross-sectionally
+    correlated, which plain OLS ignores.  Returns one row per term (intercept +
+    factors) with coef, both SEs / t-stats, and a normal-approx clustered p-value.
+    """
+    y = np.asarray(y, dtype=float)
+    Xf = np.asarray(X, dtype=float)
+    n, k = Xf.shape
+    Xd = np.column_stack([np.ones(n), Xf])            # design: intercept + factors
+    p = k + 1
+
+    XtX_inv = np.linalg.pinv(Xd.T @ Xd)
+    beta = XtX_inv @ (Xd.T @ y)
+    resid = y - Xd @ beta
+
+    # Homoskedastic (classical OLS) covariance.
+    sigma2 = (resid @ resid) / (n - p)
+    se_ols = np.sqrt(np.diag(sigma2 * XtX_inv))
+
+    # Cluster-robust (CR1) covariance, clustered by month.
+    meat = np.zeros((p, p))
+    groups = pd.Series(np.arange(n)).groupby(np.asarray(clusters)).groups
+    for idx in groups.values():
+        rows = np.asarray(idx)
+        s = Xd[rows].T @ resid[rows]                  # cluster score sum
+        meat += np.outer(s, s)
+    G = len(groups)
+    correction = (G / (G - 1)) * ((n - 1) / (n - p)) if G > 1 else 1.0
+    se_cl = np.sqrt(np.diag(correction * (XtX_inv @ meat @ XtX_inv)))
+
+    t_ols = beta / se_ols
+    t_cl = beta / se_cl
+    p_cl = [2.0 * (1.0 - _norm_cdf(abs(t))) if np.isfinite(t) else np.nan for t in t_cl]
+
+    return pd.DataFrame({
+        "term": ["intercept"] + list(factor_names),
+        "coef": beta,
+        "se_ols": se_ols, "t_ols": t_ols,
+        "se_cluster": se_cl, "t_cluster": t_cl, "p_cluster": p_cl,
+        "n_obs": n, "n_clusters_months": G,
+    })
+
+
+def normalized_regression(panel: pd.DataFrame, factor: str, norm: pd.DataFrame,
+                          start: pd.Timestamp | None = None,
+                          end: pd.Timestamp | None = None) -> pd.DataFrame:
+    """
+    Pooled (time x cross-section) OLS of the industry-relative return on a single
+    factor's z-score, clustered by month, over an optional ``[start, end]`` window.
+
+    Complements :func:`monthly_regressions`: where that re-estimates a fresh slope
+    each month and Fama-MacBeths the series, this pools every stock-month into one
+    regression of the **normalised** return (``norm``, from
+    :func:`normalized_return`) on the z-score, so the slope is the factor's average
+    industry-relative return per 1 cross-sectional sigma across the whole panel.
+    The z-score is the panel's (build-time winsorised) ``zscore`` joined to the
+    same-key normalised return; both sides therefore carry the project's standard
+    winsorisation.  Returns the intercept + factor coefficient rows from
+    :func:`pooled_ols`.
+    """
+    sub = F.prepare_slice(panel, factor, assign_q=False)
+    merged = (sub.merge(norm, on=["date", "stock_id"], how="inner")
+                 .dropna(subset=["zscore", "norm_return"]))
+    if start is not None:
+        merged = merged[merged["date"] >= start]
+    if end is not None:
+        merged = merged[merged["date"] <= end]
+    return pooled_ols(merged["norm_return"].to_numpy(),
+                      merged[["zscore"]].to_numpy(),
+                      merged["date"].to_numpy(), [factor])
+
+
+# --------------------------------------------------------------------------- #
 # Plotting
 # --------------------------------------------------------------------------- #
 def plot_long_short(spread: pd.Series, factor: str, sign: int,
@@ -325,6 +465,65 @@ def render_summary_table(summary: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+def render_normalized_table(rows: pd.DataFrame, path: Path) -> None:
+    """
+    Render the per-factor pooled normalised-return regression as a PNG.
+
+    One row per factor: the pooled slope (industry-relative monthly return per 1
+    cross-sectional sigma) with its OLS and month-clustered t-stats over the full
+    sample, the pooled observation count, and the slope / clustered t-stat
+    re-estimated on the past decade (2016+).  Clustered t-stats are shaded by
+    absolute significance.
+    """
+    cols = ["factor", "family", "coef_full", "t_ols_full", "t_cluster_full",
+            "n_obs", "coef_2016", "t_cluster_2016"]
+    headers = ["Factor", "Family", "Coef\n(ind-rel /mo per 1σ)",
+               "t (OLS)\n(full)", "t (cluster)\n(full)", "n obs",
+               "Coef\n(2016+)", "t (cluster)\n(2016+)"]
+
+    cell_text, cell_colors = [], []
+    for _, r in rows[cols].iterrows():
+        cell_text.append([
+            r["factor"], r["family"],
+            f"{r['coef_full']:+.4%}", f"{r['t_ols_full']:+.2f}",
+            f"{r['t_cluster_full']:+.2f}", f"{int(r['n_obs']):,}",
+            f"{r['coef_2016']:+.4%}", f"{r['t_cluster_2016']:+.2f}",
+        ])
+        cell_colors.append([
+            "white", "white", "white",
+            _tstat_color(r["t_ols_full"]), _tstat_color(r["t_cluster_full"]),
+            "white", "white", _tstat_color(r["t_cluster_2016"]),
+        ])
+
+    n = len(rows)
+    fig, ax = plt.subplots(figsize=(13, 0.45 * (n + 1) + 1.4))
+    ax.axis("off")
+
+    tbl = ax.table(cellText=cell_text, colLabels=headers, cellColours=cell_colors,
+                   colWidths=[0.16, 0.21, 0.155, 0.105, 0.115, 0.10, 0.085, 0.115],
+                   cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9)
+    for j in range(len(headers)):                       # bold header row
+        tbl[0, j].set_text_props(weight="bold", color="white")
+        tbl[0, j].set_facecolor("#404040")
+    for i in range(1, n + 1):                           # left-align text cols
+        tbl[i, 0].set_text_props(ha="left")
+        tbl[i, 1].set_text_props(ha="left")
+
+    fig.suptitle("Pooled time-and-cross-section regression of the industry-relative "
+                 "return on factor z-score\n(norm_return = next return − cap-weighted "
+                 "industry return;  pooled over all stock-months, t clustered by month)",
+                 fontsize=11, y=0.99)
+    fig.text(0.5, 0.015, "Shaded t-stats: |t| ≥ 1.65 (10%), darker |t| ≥ 2.0 (5%).  "
+             "Coef = industry-relative monthly return per 1 std of the factor.  "
+             "2016+ columns re-estimate on the past decade only.",
+             ha="center", fontsize=8, color="#555555")
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.80, bottom=0.10)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
 def _fmt_pct(x: float) -> str:
     return f"{x:+.4%}" if np.isfinite(x) else "—"
 
@@ -414,12 +613,18 @@ def run(panel: pd.DataFrame | None = None,
     # Industry ("market") monthly return, shared across all factor regressions.
     industry_ret = industry_monthly_return(panel)
 
+    # Industry-relative (normalised) next return per stock-month -- the dependent
+    # variable of the pooled time-and-cross-section regression below.  Built once
+    # off the shared industry return.
+    norm = normalized_return(panel, industry_ret)
+
     # Per-(stock, month) trading cost, shared across all factors (the average
     # turnover cost of each book is reported in the long-short alpha table).
     cost_panel = cost.build_cost_panel(u)
 
     summary_rows = []
     alpha_rows = []
+    norm_rows = []
     for factor in F.FACTOR_NAMES:
         factor_dir = regression_dir / factor
         factor_dir.mkdir(parents=True, exist_ok=True)
@@ -429,6 +634,22 @@ def run(panel: pd.DataFrame | None = None,
 
         full = fama_macbeth(reg["beta"])
         decade = fama_macbeth(reg.loc[reg.index >= DECADE_START, "beta"])
+
+        # Pooled (time x cross-section) regression of the industry-relative return
+        # on the factor z-score: the slope and its clustered t-stat, full sample
+        # and past decade.  Complements the monthly "beta over time" above.
+        nfull = normalized_regression(panel, factor, norm).set_index("term").loc[factor]
+        n2016 = (normalized_regression(panel, factor, norm, start=DECADE_START)
+                 .set_index("term").loc[factor])
+        norm_rows.append({
+            "factor": factor, "family": F.FACTORS[factor]["family"],
+            "coef_full": nfull["coef"], "t_ols_full": nfull["t_ols"],
+            "t_cluster_full": nfull["t_cluster"], "p_cluster_full": nfull["p_cluster"],
+            "n_obs": nfull["n_obs"], "n_months": nfull["n_clusters_months"],
+            "coef_2016": n2016["coef"], "t_ols_2016": n2016["t_ols"],
+            "t_cluster_2016": n2016["t_cluster"], "p_cluster_2016": n2016["p_cluster"],
+            "n_obs_2016": n2016["n_obs"], "n_months_2016": n2016["n_clusters_months"],
+        })
 
         # Directional dollar-neutral long-short book, signed by the full-sample
         # Fama-MacBeth t-stat, with its return path plotted over time.
@@ -501,12 +722,20 @@ def run(panel: pd.DataFrame | None = None,
     summary.to_csv(regression_dir / "summary.csv", index=False)
     render_summary_table(summary, regression_dir / "summary_table.png")
 
+    # Pooled normalised-return regression table (time x cross-section), alongside
+    # the per-month "beta over time" summary.
+    norm_tbl = pd.DataFrame(norm_rows)
+    norm_tbl.to_csv(regression_dir / "normalized_regression.csv", index=False)
+    render_normalized_table(norm_tbl, regression_dir / "normalized_regression_table.png")
+
     # Long-short-vs-industry alpha table, saved alongside the quintile books.
     alpha_tbl = pd.DataFrame(alpha_rows)
     alpha_tbl.to_csv(quintile_dir / "long_short_market_alpha.csv", index=False)
     render_alpha_table(alpha_tbl, quintile_dir / "long_short_market_alpha.png")
 
     print(f"\nSaved regression outputs -> {regression_dir}")
+    print(f"Saved normalized-return regression table -> "
+          f"{regression_dir / 'normalized_regression_table.png'}")
     print(f"Saved long-short alpha table -> "
           f"{quintile_dir / 'long_short_market_alpha.png'}")
     return summary

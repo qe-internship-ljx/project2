@@ -36,6 +36,7 @@ and tend to outperform on a risk-adjusted basis.
     rd_earning_stability   - trailing 36m coeff. of variation of (R&D intensity / EPS)  long high    R&D-vs-earnings consistency
     gross_margin_stability - trailing 36m coeff. of variation of gross margin           long high    gross-margin consistency
     cashflow_stability     - trailing 36m coeff. of variation of OCF margin             long high    cash-generation consistency
+    rd_revenue_stability   z(rd_stability) + z(revenue_stability)                       long high    combined R&D + revenue consistency
 
 * ``earning_stability`` is the negative trailing-36m coefficient of variation
   (std / |mean|) of diluted EPS (``earnings_ltm / diluted_shares_outstanding``).
@@ -66,6 +67,22 @@ and tend to outperform on a risk-adjusted basis.
   software stock-months (less reliably so than gross margin but far more than
   EPS), so the robust |mean| denominator and near-zero-mean guard do real work
   here.  Currency-neutral by construction (a ratio of same-currency line items).
+* ``rd_revenue_stability`` is the **sum of two existing stability signals**:
+  ``rd_stability`` (the negative trailing-36m coefficient of variation of R&D
+  intensity, from ``RD/rd_factors.py``) and ``revenue_stability`` (the negative
+  trailing-36m standard deviation of YoY revenue growth, from
+  ``Rev & Cost/revcost_factors.py``).  The two raw signals live on incomparable
+  scales (a CoV *ratio* vs the std of a *growth rate*), so a raw sum would simply
+  track whichever has the larger spread.  Following the project convention for
+  combining factors (Experiment 3's composite ``score = sum of z-scores``), we
+  therefore add them **after** standardising each cross-sectionally --
+  ``value = zscore(rd_stability) + zscore(revenue_stability)`` -- so each
+  contributes equally.  Both components are reproduced here verbatim from their
+  home libraries (same 36m/min-24 windows and guards) rather than read from the
+  other panels, keeping this library a self-contained drop-in for the engine.
+  The sum exists only where BOTH components do (R&D-reporting firms with >=2y of
+  history on each series), so its coverage is the intersection -- the
+  R&D-reporting subset.
 
 EPS sign instability (important)
 --------------------------------
@@ -154,6 +171,9 @@ INDUSTRY_GROUP = "Software & Services"
 # Estimation windows / parameters.
 STAB_WINDOW = 36            # trailing months for the coefficient-of-variation moment
 STAB_MIN_PERIODS = 24       # require >=2y of history before a stability score exists
+YOY_LAG = 12                # year-over-year lag (months), for revenue_stability's growth series
+MIN_MEAN_INTENSITY = 0.005  # floor on trailing mean R&D/sales below which rd_stability's
+                            # CoV is undefined (R&D ~ 0); copied verbatim from RD/rd_factors.py
 MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction of
                             # the trailing mean magnitude (mean|x|); below it the
                             # series oscillates around zero and the CoV is undefined.
@@ -171,6 +191,7 @@ FACTORS: dict[str, dict] = {
     "rd_earning_stability": {"family": "R&D-earnings stability (R&D-intensity/EPS consistency)", "higher_is_bullish": True},
     "gross_margin_stability": {"family": "Gross-margin stability (gross-margin consistency)", "higher_is_bullish": True},
     "cashflow_stability":    {"family": "Cash-flow stability (OCF-margin consistency)",      "higher_is_bullish": True},
+    "rd_revenue_stability":  {"family": "R&D + revenue stability (z-score sum)",             "higher_is_bullish": True},
 }
 FACTOR_NAMES = list(FACTORS)
 
@@ -299,6 +320,16 @@ def _rd_intensity_series(p: pd.DataFrame) -> pd.Series:
     return rd / sales.where(sales > 0.0)
 
 
+def _yoy_growth(p: pd.DataFrame, s: pd.Series) -> pd.Series:
+    """Year-over-year growth (level_t / level_{t-12m} - 1) of a series, per stock.
+
+    The prior-year level is guarded strictly positive so the growth rate is well
+    defined; copied verbatim from ``Rev & Cost/revcost_factors.py`` (used only by
+    the ``revenue_stability`` component of ``rd_revenue_stability``)."""
+    prev = s.groupby(p["stock_id"], observed=True).shift(YOY_LAG)
+    return s / prev.where(prev > 0.0) - 1.0
+
+
 def _gross_margin_series(p: pd.DataFrame) -> pd.Series:
     """Gross margin = LTM gross income / LTM sales (sales must be positive).
 
@@ -403,11 +434,52 @@ def _f_cashflow_stability(p: pd.DataFrame) -> pd.Series:
     return _neg_coeff_of_variation(p, _ocf_margin_series(p))
 
 
+# --- components of rd_revenue_stability (reproduced verbatim from their home
+#     libraries, so this library stays a self-contained drop-in for the engine) --
+def _rd_stability_raw(p: pd.DataFrame) -> pd.Series:
+    """``rd_stability`` from ``RD/rd_factors.py``: the NEGATIVE trailing-36m
+    coefficient of variation (std / mean) of R&D intensity, undefined when the
+    trailing mean intensity is below ``MIN_MEAN_INTENSITY`` (R&D ~ 0)."""
+    intensity = _rd_intensity_series(p)
+    g = intensity.groupby(p["stock_id"], observed=True)
+    mean = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).mean())
+    std = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std())
+    cov = std / mean.where(mean > MIN_MEAN_INTENSITY)
+    return -cov
+
+
+def _revenue_stability_raw(p: pd.DataFrame) -> pd.Series:
+    """``revenue_stability`` from ``Rev & Cost/revcost_factors.py``: the NEGATIVE
+    trailing-36m standard deviation of YoY revenue (``sales_ltm``) growth."""
+    g = _yoy_growth(p, p["sales_ltm"].astype(float)).replace([np.inf, -np.inf], np.nan)
+    std = (g.groupby(p["stock_id"], observed=True)
+            .transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std()))
+    return -std
+
+
+def _f_rd_revenue_stability(p: pd.DataFrame) -> pd.Series:
+    """
+    Combined R&D + revenue stability: the **sum of the cross-sectional z-scores**
+    of ``rd_stability`` and ``revenue_stability``.  The two raw signals are on
+    incomparable scales (a CoV ratio vs the std of a growth rate), so we
+    standardise each within the monthly cross-section first -- exactly as each
+    library z-scores it -- then add, mirroring Experiment 3's composite
+    (``score = sum of z-scores``).  Each component's z-score is taken over its own
+    natural coverage; the sum then exists only where BOTH are present (the
+    R&D-reporting subset), so a high score marks a firm that is steady on *both*
+    its product reinvestment and its top line.
+    """
+    z_rd = cross_sectional_zscore(_rd_stability_raw(p), p["period"])
+    z_rev = cross_sectional_zscore(_revenue_stability_raw(p), p["period"])
+    return z_rd + z_rev
+
+
 _FACTOR_FUNCS = {
     "earning_stability": _f_earning_stability,
     "rd_earning_stability": _f_rd_earning_stability,
     "gross_margin_stability": _f_gross_margin_stability,
     "cashflow_stability": _f_cashflow_stability,
+    "rd_revenue_stability": _f_rd_revenue_stability,
 }
 
 

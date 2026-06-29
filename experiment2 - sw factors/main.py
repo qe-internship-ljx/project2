@@ -28,6 +28,12 @@ Experiment 1 layout one-for-one::
                                   + long_short_market_alpha.{csv,png}
       regression/  <factor>/...   + summary.csv + summary_table.png
 
+After the Standard run finishes, this driver also runs every sibling
+subexperiment (``RD/``, ``Rev & Cost/``, ``Growth/``, ``Stability/``,
+``Cross_val/``) by invoking each one's ``main_*.py`` in its own subprocess.
+Each subexperiment binds ``factors`` to its own library at import time, so they
+must not share an interpreter -- a subprocess per driver keeps them isolated.
+
 Run standalone::
 
     python main.py
@@ -35,6 +41,7 @@ Run standalone::
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -56,6 +63,41 @@ import regression      # noqa: E402
 
 UNIVERSE = S.SOFTWARE_SERVICES
 
+# --- Sibling subexperiments.  Each lives in its own subfolder with its own
+#     factor library and `main_*.py` driver that does the same ``import factors
+#     as F`` dependency injection this file does -- binding ``factors`` to *its*
+#     library before importing quintile/regression.  Those module-level bindings
+#     are cached per Python process, so the subexperiments cannot share one
+#     interpreter without clobbering each other's ``factors`` (the first one
+#     imported would win for all).  We therefore run each as its own subprocess,
+#     exactly the documented ``python main_*.py`` standalone path.
+_THIS_DIR = Path(__file__).resolve().parent
+_SUBEXPERIMENTS = [
+    _THIS_DIR / "RD" / "main_rd.py",
+    _THIS_DIR / "Rev & Cost" / "main_revcost.py",
+    _THIS_DIR / "Growth" / "main_growth.py",
+    _THIS_DIR / "Stability" / "main_stability.py",
+    _THIS_DIR / "Cross_val" / "main_crossval.py",
+]
+
+
+def run_subexperiments() -> None:
+    """Run every subexperiment driver in its own subprocess, continuing past
+    any that fail and reporting the roster at the end."""
+    failed: list[str] = []
+    for path in _SUBEXPERIMENTS:
+        label = f"{path.parent.name}/{path.name}"
+        print(f"\n{'#' * 72}\n# Subexperiment: {label}\n{'#' * 72}")
+        result = subprocess.run([sys.executable, path.name], cwd=path.parent)
+        if result.returncode != 0:
+            failed.append(label)
+            print(f"!! {label} exited with code {result.returncode}")
+
+    if failed:
+        print(f"\n{len(failed)} subexperiment(s) FAILED: {', '.join(failed)}")
+    else:
+        print(f"\nAll {len(_SUBEXPERIMENTS)} subexperiments completed.")
+
 
 def main() -> None:
     print(f"=== Building software factor panel: {UNIVERSE.slug} "
@@ -75,7 +117,10 @@ def main() -> None:
     print("\n=== Approach 2: cross-sectional regressions ===")
     regression.run(panel=panel, u=UNIVERSE)
 
-    print(f"\nDone. All outputs under {UNIVERSE.output_dir}")
+    print(f"\nDone (Standard). All outputs under {UNIVERSE.output_dir}")
+
+    # Run the remaining subexperiments (each in its own process, see above).
+    run_subexperiments()
 
 
 if __name__ == "__main__":
