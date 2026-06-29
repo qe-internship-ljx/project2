@@ -83,7 +83,7 @@ def run_correlation_analysis() -> None:
 
     rc_panel = UNIVERSE.panel_path                                  # Rev & Cost/factor_panel.csv
     general_panel = _EXP1_DIR / "output" / "software" / "factor_panel.csv"
-    software_panel = _EXP2_DIR / "standard" / "factor_panel.csv"
+    software_panel = _EXP2_DIR / "Standard" / "factor_panel.csv"
     rd_panel = _EXP2_DIR / "RD" / "factor_panel.csv"
     corr_root = UNIVERSE.output_dir / "factor_correlation"
 

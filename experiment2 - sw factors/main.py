@@ -19,10 +19,10 @@ Experiment 1's analysis modules bind to their factor library via ``import
 factors as F``.  We register our software-factor library under that name in
 ``sys.modules`` *before* importing them, so their ``F`` resolves to
 ``sw_factors`` -- a clean dependency injection that leaves Experiment 1 wholly
-untouched.  Results land in ``standard/``, mirroring the
+untouched.  Results land in ``Standard/``, mirroring the
 Experiment 1 layout one-for-one::
 
-    standard/
+    Standard/
       factor_panel.csv
       quintile/    <factor>/...   + summary.csv + summary_table.png
                                   + long_short_market_alpha.{csv,png}
