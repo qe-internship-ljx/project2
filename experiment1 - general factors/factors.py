@@ -96,10 +96,11 @@ USE_CANONICAL_LS_DIRECTION = True
 @dataclass(frozen=True)
 class Universe:
     slug: str                                    # output subfolder / label
-    price_file: str                              # pre-filtered price feather
+    price_file: str                              # price feather
     output_dir: Path                             # where this universe writes
     industry_group: str | None = None            # match gics_industry_group_name
     industries: tuple[str, ...] | None = None    # match gics_industry_name
+    min_mcap_usd: float | None = None            # point-in-time min market cap (USD)
 
     @property
     def panel_path(self) -> Path:
@@ -113,6 +114,7 @@ SOFTWARE_SERVICES = Universe(
     price_file="price_software_services.feather",
     output_dir=OUTPUT_DIR / "software",
     industry_group=INDUSTRY_GROUP,
+    min_mcap_usd=0.1e9,   # point-in-time screen: hold only names >= $0.1B at formation
 )
 
 # New universe: Banks + Insurance (gics_industry_name), writing to a dedicated
@@ -472,6 +474,30 @@ def add_next_return(panel: pd.DataFrame) -> pd.DataFrame:
     return panel
 
 
+def apply_mcap_screen(panel: pd.DataFrame, u: Universe = SOFTWARE_SERVICES) -> pd.DataFrame:
+    """
+    Point-in-time market-cap screen: keep each (stock_id, month) row only if its
+    formation-date USD market cap (``security_mcap_usd``, the month-end cap that is
+    known when the portfolio is formed) is at least ``u.min_mcap_usd``.
+
+    Run *after* the time-series factors (momentum, beta, ...) and ``next_return``
+    are built on the full contiguous history, but *before* :func:`add_zscores`, so:
+      * each stock's signal and forward return use its true month-to-month history
+        (no splicing of non-adjacent months -- a name can leave and re-enter the
+        universe across months), and
+      * cross-sectional z-scores / quintile breakpoints are formed *within* the
+        investable (>= threshold) universe.
+    A name eligible at formation is held through ``next_return`` regardless of its
+    cap in the held month -- the standard screen-then-hold convention.  Rows with a
+    missing USD cap fail the ``>=`` test and drop out (cap not established).  With
+    ``min_mcap_usd is None`` the panel is returned unchanged.
+    """
+    if u.min_mcap_usd is None:
+        return panel
+    keep = panel["security_mcap_usd"] >= u.min_mcap_usd
+    return panel.loc[keep].reset_index(drop=True)
+
+
 # --------------------------------------------------------------------------- #
 # Tidy output
 # --------------------------------------------------------------------------- #
@@ -497,11 +523,18 @@ def to_long_panel(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 def build(save: bool = True, u: Universe = SOFTWARE_SERVICES) -> pd.DataFrame:
-    """Full build: panel -> factors -> z-scores -> next return -> tidy long."""
+    """Full build: panel -> factors -> next return -> mcap screen -> z-scores -> tidy long.
+
+    The market-cap screen sits after the time-series factors and ``next_return``
+    (computed on the full contiguous history) but before the cross-sectional
+    z-scores, so breakpoints form within the investable universe -- see
+    :func:`apply_mcap_screen`.
+    """
     panel = build_monthly_panel(u=u)
     panel = compute_factors(panel)
-    panel = add_zscores(panel)
     panel = add_next_return(panel)
+    panel = apply_mcap_screen(panel, u)
+    panel = add_zscores(panel)
     long = to_long_panel(panel)
     if save:
         u.output_dir.mkdir(parents=True, exist_ok=True)

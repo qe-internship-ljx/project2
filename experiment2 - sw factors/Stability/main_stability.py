@@ -20,17 +20,12 @@ one-for-one::
       quintile/    <factor>/...   + summary.csv
                                   + long_short_market_alpha.{csv,png}
       regression/  <factor>/...   + summary.csv + summary_table.png
-      factor_correlation/         redundancy of each stability factor vs ...
-        vs_general/<factor>/...   ... the Exp1 general market factors,
-        vs_software/<factor>/...  ... the Exp2 software factors, and
-        vs_rd/<factor>/...        ... the Exp2 R&D-behaviour factors
+      factor_correlation/<factor>/...   redundancy of each stability factor vs
+                                        the Exp1 general market factors
 
 The ``factor_correlation`` step reuses Experiment 3's panel-agnostic
 ``factor_correlation.run`` to quantify how little of each stability factor is
-spanned by the pre-existing factors.  The ``vs_rd`` comparison is included
-because both factors are second-moment cousins of ``rd_stability`` and
-``rd_earning_stability`` is built directly on R&D intensity, so the R&D library
-is the *nearest* benchmark for novelty.
+spanned by the Exp1 general market factors.
 
 Run standalone::
 
@@ -52,7 +47,6 @@ sys.modules["factors"] = S
 # This driver lives in experiment2's Stability/ subfolder, so the project root is
 # three parents up (Stability -> "experiment2 - sw factors" -> project root).
 _EXP1_DIR = Path(__file__).resolve().parent.parent.parent / "experiment1 - general factors"
-_EXP2_DIR = Path(__file__).resolve().parent.parent          # the "experiment2 - sw factors" dir
 _EXP3_DIR = Path(__file__).resolve().parent.parent.parent / "experiment3 - multifactor"
 sys.path.insert(0, str(_EXP1_DIR))
 
@@ -75,38 +69,29 @@ def _load_factor_correlation():
 
 def run_correlation_analysis() -> None:
     """
-    Quantify how much of each stability factor is already explained by the
-    existing factors, three ways: vs Experiment 1's 9 general market factors, vs
-    Experiment 2's established software factors, and vs Experiment 2's
-    R&D-behaviour factors (the nearest benchmark).  Writes one R^2 table per
-    (comparison, factor) under ``Stability/factor_correlation/``.
+    Quantify how much of each stability factor is already explained by
+    Experiment 1's 9 general market factors.  Writes one R^2 table per factor
+    under ``Stability/factor_correlation/<factor>/``.
     """
     fc = _load_factor_correlation()
 
     target_panel = UNIVERSE.panel_path                              # Stability/factor_panel.csv
     general_panel = _EXP1_DIR / "output" / "software" / "factor_panel.csv"
-    software_panel = _EXP2_DIR / "Standard" / "factor_panel.csv"
-    rd_panel = _EXP2_DIR / "RD" / "factor_panel.csv"
     corr_root = UNIVERSE.output_dir / "factor_correlation"
 
-    comparisons = [
-        ("vs_general", general_panel, "Exp1 general market factors"),
-        ("vs_software", software_panel, "Exp2 software factors"),
-        ("vs_rd", rd_panel, "Exp2 R&D-behaviour factors"),
-    ]
-    for tag, market_panel, label in comparisons:
-        if not market_panel.exists():
-            print(f"  [skip] {label}: {market_panel} not found "
-                  f"(build that experiment's panel first)")
-            continue
-        print(f"\n--- Redundancy of stability factors {tag.replace('_', ' ')} "
-              f"({label}) ---")
-        for factor in S.FACTOR_NAMES:
-            fc.run(target_factor=factor,
-                   target_panel=target_panel,
-                   market_panel=market_panel,
-                   out_dir=corr_root / tag / factor,
-                   include_market_cap=(tag == "vs_general"))
+    if not general_panel.exists():
+        print(f"  [skip] Exp1 general market factors: {general_panel} not found "
+              f"(build experiment1's software panel first)")
+        return
+
+    print(f"\n--- Redundancy of stability factors vs general "
+          f"(Exp1 general market factors) ---")
+    for factor in S.FACTOR_NAMES:
+        fc.run(target_factor=factor,
+               target_panel=target_panel,
+               market_panel=general_panel,
+               out_dir=corr_root / factor,
+               include_market_cap=True)
 
 
 def main() -> None:

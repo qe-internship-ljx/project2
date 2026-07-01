@@ -30,59 +30,56 @@ stable, predictable earnings are a recognised quality dimension (Dichev & Tang
 on smoothing).  Low-volatility earners are rewarded with lower cost of capital
 and tend to outperform on a risk-adjusted basis.
 
-    name                   definition                                                   dir          dimension
-    ---------------------  -----------------------------------------------------------  ----------   -----------
-    earning_stability      - trailing 36m coeff. of variation of EPS                    long high    earnings consistency
-    rd_earning_stability   - trailing 36m coeff. of variation of (R&D intensity / EPS)  long high    R&D-vs-earnings consistency
-    gross_margin_stability - trailing 36m coeff. of variation of gross margin           long high    gross-margin consistency
-    cashflow_stability     - trailing 36m coeff. of variation of OCF margin             long high    cash-generation consistency
-    rd_revenue_stability   z(rd_stability) + z(revenue_stability)                       long high    combined R&D + revenue consistency
+    name                          definition                                                       dir          dimension
+    ----------------------------  ---------------------------------------------------------------  ----------   -----------
+    earning_stability             - trailing 12m coeff. of variation of EPS                        long high    earnings consistency
+    rd_earning_stability          - trailing 12m coeff. of variation of (EPS / trailing-36m        long high    R&D-vs-earnings consistency
+                                    avg R&D intensity)
+    cashflow_stability            - trailing 12m coeff. of variation of OCF margin                 long high    cash-generation consistency
+    return_stability              - trailing 12m coeff. of variation of monthly return             long high    return consistency (low-vol)
+    gross_profitability_stability - trailing 12m coeff. of variation of GP/assets                  long high    gross-profitability consistency
 
-* ``earning_stability`` is the negative trailing-36m coefficient of variation
+All factors use a **trailing 12-month** window (down from 36m): a shorter window
+makes each stability score a more *current* read on consistency and roughly
+triples the number of scorable stock-months at the front of each name's history.
+
+* ``earning_stability`` is the negative trailing-12m coefficient of variation
   (std / |mean|) of diluted EPS (``earnings_ltm / diluted_shares_outstanding``).
   High (near 0) => steady, predictable earnings; very negative => erratic
   earnings.  A pure second moment, orthogonal by construction to every earnings
   *level* / valuation signal in the project.
-* ``rd_earning_stability`` is the negative trailing-36m coefficient of variation
-  of the ratio ``rd_intensity / EPS`` = ``(rd_ltm / sales_ltm) / EPS`` -- the
-  consistency of how a firm's product reinvestment relates to its bottom line.
-  A firm whose R&D-to-earnings posture is steady scores high; one whose R&D
-  swings wildly relative to (or against) earnings scores low.
-* ``gross_margin_stability`` is the negative trailing-36m coefficient of
-  variation of gross margin (``gross_income_ltm / sales_ltm``).  Gross margin is
-  the cleanest read on a software firm's unit economics / pricing power; a steady
-  margin signals a durable, well-priced product (high score), while a margin that
-  swings around signals pricing pressure or an unstable cost base (low score).
-  Unlike EPS, gross margin is almost always positive (>0 for ~90% of software
-  stock-months) and well bounded, so the |mean| denominator is robust and the
-  near-zero-mean guard rarely binds; it is also currency-neutral by construction
-  (a ratio of same-currency line items).
-* ``cashflow_stability`` is the negative trailing-36m coefficient of variation of
-  the operating cash-flow margin (``operating_cf_ltm / sales_ltm``).  Where
-  ``gross_margin_stability`` watches the consistency of accrual unit economics,
-  this watches the consistency of *cash* generation -- harder to manage and a
+* ``rd_earning_stability`` is the negative trailing-12m coefficient of variation
+  of the ratio ``EPS / avg_rd_intensity``, where ``avg_rd_intensity`` is the
+  firm's **trailing-36m average R&D intensity** (``rd_ltm / sales_ltm``).  It
+  measures how steadily earnings are delivered per unit of the firm's baseline
+  reinvestment posture: normalising EPS by a slow-moving (36m) R&D-intensity base
+  puts high- and low-R&D firms on a comparable footing, then the 12m coefficient
+  of variation scores the consistency of that earnings-per-reinvestment stream.
+  A firm that earns steadily against its established R&D level scores high; one
+  whose earnings swing relative to that base scores low.
+* ``cashflow_stability`` is the negative trailing-12m coefficient of variation of
+  the operating cash-flow margin (``operating_cf_ltm / sales_ltm``).  It watches
+  the consistency of *cash* generation -- harder to manage and a
   classic earnings-quality cross-check (steady cash conversion signals real,
   durable profitability; lumpy cash conversion flags accrual-driven or
   working-capital-driven earnings).  Operating cash flow is positive for ~72% of
   software stock-months (less reliably so than gross margin but far more than
   EPS), so the robust |mean| denominator and near-zero-mean guard do real work
   here.  Currency-neutral by construction (a ratio of same-currency line items).
-* ``rd_revenue_stability`` is the **sum of two existing stability signals**:
-  ``rd_stability`` (the negative trailing-36m coefficient of variation of R&D
-  intensity, from ``RD/rd_factors.py``) and ``revenue_stability`` (the negative
-  trailing-36m standard deviation of YoY revenue growth, from
-  ``Rev & Cost/revcost_factors.py``).  The two raw signals live on incomparable
-  scales (a CoV *ratio* vs the std of a *growth rate*), so a raw sum would simply
-  track whichever has the larger spread.  Following the project convention for
-  combining factors (Experiment 3's composite ``score = sum of z-scores``), we
-  therefore add them **after** standardising each cross-sectionally --
-  ``value = zscore(rd_stability) + zscore(revenue_stability)`` -- so each
-  contributes equally.  Both components are reproduced here verbatim from their
-  home libraries (same 36m/min-24 windows and guards) rather than read from the
-  other panels, keeping this library a self-contained drop-in for the engine.
-  The sum exists only where BOTH components do (R&D-reporting firms with >=2y of
-  history on each series), so its coverage is the intersection -- the
-  R&D-reporting subset.
+* ``return_stability`` is the negative trailing-12m coefficient of variation of
+  the monthly total return.  A high score (return std small relative to its mean)
+  marks a smooth, low-volatility return stream -- the same direction as the
+  low-volatility / high-Sharpe anomaly; a very negative score marks an erratic,
+  lottery-like stream.  Built straight off prices, so it needs no fundamentals
+  and is the most data-complete factor here; monthly returns swing sign with a
+  small trailing mean, so the sign-robust |mean| denominator and near-zero-mean
+  guard do the most work for this factor.
+* ``gross_profitability_stability`` is the negative trailing-12m coefficient of
+  variation of gross profitability (``gross_income_ltm / assets``; Novy-Marx
+  2013).  It watches the consistency of gross profit *per dollar of
+  assets* -- how steadily the asset base is turned into gross profit.  Like gross
+  margin it is almost always positive in software and currency-neutral (a ratio
+  of same-currency line items), so the near-zero-mean guard rarely binds.
 
 EPS sign instability (important)
 --------------------------------
@@ -151,6 +148,7 @@ weighted_group_mean = _engine.weighted_group_mean          # used by the injecte
 winsorize_cross_section = _engine.winsorize_cross_section
 cross_sectional_zscore = _engine.cross_sectional_zscore
 add_next_return = _engine.add_next_return
+apply_mcap_screen = _engine.apply_mcap_screen      # generic: point-in-time min-mcap screen
 assign_quintiles = _engine.assign_quintiles
 prepare_slice = _engine.prepare_slice
 ols = _engine.ols
@@ -169,11 +167,12 @@ OUTPUT_DIR = Path(__file__).resolve().parent
 INDUSTRY_GROUP = "Software & Services"
 
 # Estimation windows / parameters.
-STAB_WINDOW = 36            # trailing months for the coefficient-of-variation moment
-STAB_MIN_PERIODS = 24       # require >=2y of history before a stability score exists
-YOY_LAG = 12                # year-over-year lag (months), for revenue_stability's growth series
-MIN_MEAN_INTENSITY = 0.005  # floor on trailing mean R&D/sales below which rd_stability's
-                            # CoV is undefined (R&D ~ 0); copied verbatim from RD/rd_factors.py
+STAB_WINDOW = 12            # trailing months for the coefficient-of-variation moment
+STAB_MIN_PERIODS = 9        # require >=9 of the trailing 12 months before a score exists
+                            # (the same ~2/3-of-window coverage the 36m window used)
+RD_AVG_WINDOW = 36          # trailing months for rd_earning_stability's R&D-intensity base
+RD_AVG_MIN_PERIODS = 24     # require >=24 of the trailing 36 months (~2/3 coverage)
+                            # before the R&D-intensity base is defined
 MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction of
                             # the trailing mean magnitude (mean|x|); below it the
                             # series oscillates around zero and the CoV is undefined.
@@ -188,10 +187,10 @@ MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction
 # *against* the hypothesis -- exactly what we want for hypothesis testing.
 FACTORS: dict[str, dict] = {
     "earning_stability":    {"family": "Earnings stability (EPS consistency)",            "higher_is_bullish": True},
-    "rd_earning_stability": {"family": "R&D-earnings stability (R&D-intensity/EPS consistency)", "higher_is_bullish": True},
-    "gross_margin_stability": {"family": "Gross-margin stability (gross-margin consistency)", "higher_is_bullish": True},
+    "rd_earning_stability": {"family": "R&D-earnings stability (EPS-per-R&D-intensity consistency)", "higher_is_bullish": True},
     "cashflow_stability":    {"family": "Cash-flow stability (OCF-margin consistency)",      "higher_is_bullish": True},
-    "rd_revenue_stability":  {"family": "R&D + revenue stability (z-score sum)",             "higher_is_bullish": True},
+    "return_stability":      {"family": "Return stability (monthly-return consistency)",     "higher_is_bullish": True},
+    "gross_profitability_stability": {"family": "Gross-profitability stability (GP/assets consistency)", "higher_is_bullish": True},
 }
 FACTOR_NAMES = list(FACTORS)
 
@@ -209,6 +208,7 @@ SOFTWARE_SERVICES = Universe(
     price_file="price_software_services.feather",
     output_dir=OUTPUT_DIR,
     industry_group=INDUSTRY_GROUP,
+    min_mcap_usd=0.1e9,   # point-in-time screen: hold only names >= $0.1B at formation
 )
 
 UNIVERSES: dict[str, Universe] = {SOFTWARE_SERVICES.slug: SOFTWARE_SERVICES}
@@ -228,7 +228,8 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     """
     Point-in-time monthly fundamentals carrying everything the stability factors
     need: LTM earnings (net income), R&D expense, sales, LTM gross income (for
-    gross margin), LTM operating cash flow (for the OCF margin), and the diluted
+    gross margin and gross profitability), total assets (for gross
+    profitability), LTM operating cash flow (for the OCF margin), and the diluted
     share count used to turn earnings into EPS.
 
     Each record carries ``observation_date`` (when the report became
@@ -238,7 +239,7 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     """
     base_cols = ["date_fundamental", "observation_date", "stock_id",
                  "earnings_ltm", "rd_ltm", "sales_ltm", "gross_income_ltm",
-                 "operating_cf_ltm"]
+                 "operating_cf_ltm", "assets"]
     fm = pd.read_feather(DATA_DIR / "fundamental_master.feather", columns=base_cols)
     fm["stock_id"] = fm["stock_id"].astype(str)
     fm = fm[fm["stock_id"].isin(universe)].copy()
@@ -320,26 +321,6 @@ def _rd_intensity_series(p: pd.DataFrame) -> pd.Series:
     return rd / sales.where(sales > 0.0)
 
 
-def _yoy_growth(p: pd.DataFrame, s: pd.Series) -> pd.Series:
-    """Year-over-year growth (level_t / level_{t-12m} - 1) of a series, per stock.
-
-    The prior-year level is guarded strictly positive so the growth rate is well
-    defined; copied verbatim from ``Rev & Cost/revcost_factors.py`` (used only by
-    the ``revenue_stability`` component of ``rd_revenue_stability``)."""
-    prev = s.groupby(p["stock_id"], observed=True).shift(YOY_LAG)
-    return s / prev.where(prev > 0.0) - 1.0
-
-
-def _gross_margin_series(p: pd.DataFrame) -> pd.Series:
-    """Gross margin = LTM gross income / LTM sales (sales must be positive).
-
-    Currency-neutral (a ratio of same-currency line items) and almost always
-    positive in software, so the |mean| denominator of the CoV is robust."""
-    sales = p["sales_ltm"].astype(float)
-    gross = p["gross_income_ltm"].astype(float)
-    return gross / sales.where(sales > 0.0)
-
-
 def _ocf_margin_series(p: pd.DataFrame) -> pd.Series:
     """Operating cash-flow margin = LTM operating cash flow / LTM sales (sales
     must be positive).
@@ -350,6 +331,30 @@ def _ocf_margin_series(p: pd.DataFrame) -> pd.Series:
     sales = p["sales_ltm"].astype(float)
     ocf = p["operating_cf_ltm"].astype(float)
     return ocf / sales.where(sales > 0.0)
+
+
+def _return_series(p: pd.DataFrame) -> pd.Series:
+    """Monthly total return (already on the panel as ``mret``).
+
+    Returns are unitless and currency-neutral, so they feed the coefficient of
+    variation directly.  The series swings sign month to month and its trailing
+    mean is small relative to its dispersion, so the sign-robust |mean|
+    denominator and the near-zero-mean guard in :func:`_neg_coeff_of_variation`
+    do real work here."""
+    return p["mret"].astype(float)
+
+
+def _gross_profitability_series(p: pd.DataFrame) -> pd.Series:
+    """Gross profitability = LTM gross income / total assets (Novy-Marx 2013;
+    assets must be positive).
+
+    The cleanest level measure of productivity/quality.  Currency-neutral (a
+    ratio of same-currency line items) and almost always positive in software,
+    so the |mean| denominator of the CoV is robust -- like gross margin, the
+    near-zero-mean guard rarely binds."""
+    assets = p["assets"].astype(float)
+    gross = p["gross_income_ltm"].astype(float)
+    return gross / assets.where(assets > 0.0)
 
 
 def _neg_coeff_of_variation(p: pd.DataFrame, x: pd.Series) -> pd.Series:
@@ -382,7 +387,7 @@ def _neg_coeff_of_variation(p: pd.DataFrame, x: pd.Series) -> pd.Series:
 # --------------------------------------------------------------------------- #
 def _f_earning_stability(p: pd.DataFrame) -> pd.Series:
     """
-    Earnings stability: the negative trailing-36m robust coefficient of
+    Earnings stability: the negative trailing-12m robust coefficient of
     variation of diluted EPS.  High => steady, predictable earnings (a quality
     hallmark -- low earnings volatility commands a lower cost of capital and
     predicts better risk-adjusted returns; Dichev & Tang 2009); very negative =>
@@ -394,92 +399,74 @@ def _f_earning_stability(p: pd.DataFrame) -> pd.Series:
 
 def _f_rd_earning_stability(p: pd.DataFrame) -> pd.Series:
     """
-    R&D-earnings stability: the negative trailing-36m robust coefficient of
-    variation of the ratio ``rd_intensity / EPS`` = ``(rd_ltm / sales_ltm) /
-    EPS``.  Captures the consistency of a firm's product-reinvestment posture
-    *relative to its bottom line*: a steady R&D-to-earnings relationship scores
-    high; one that swings wildly (R&D lurching relative to, or against, earnings)
-    scores low.  Combines the R&D-discipline idea of ``rd_stability`` with the
-    earnings dimension of ``earning_stability``.
+    R&D-earnings stability: the negative trailing-12m robust coefficient of
+    variation of ``EPS / avg_rd_intensity``, where ``avg_rd_intensity`` is the
+    firm's trailing-36m average R&D intensity (``rd_ltm / sales_ltm``).
+    Normalising EPS by a slow-moving (36m) R&D-intensity base puts firms with
+    different reinvestment levels on a comparable footing, then the 12m
+    coefficient of variation scores the consistency of the resulting
+    earnings-per-reinvestment stream: a firm that earns steadily against its
+    established R&D level scores high; one whose earnings swing relative to that
+    base scores low.  Combines the R&D-discipline idea of ``rd_stability`` with
+    the earnings dimension of ``earning_stability``.
     """
     eps = _eps_series(p)
-    ratio = _rd_intensity_series(p) / eps.where(eps != 0.0)
+    rd_intensity = _rd_intensity_series(p)
+    avg_rd_intensity = (rd_intensity.groupby(p["stock_id"], observed=True)
+                        .transform(lambda s: s.rolling(
+                            RD_AVG_WINDOW, min_periods=RD_AVG_MIN_PERIODS).mean()))
+    ratio = eps / avg_rd_intensity.where(avg_rd_intensity > 0.0)
     return _neg_coeff_of_variation(p, ratio)
-
-
-def _f_gross_margin_stability(p: pd.DataFrame) -> pd.Series:
-    """
-    Gross-margin stability: the negative trailing-36m robust coefficient of
-    variation of gross margin (``gross_income_ltm / sales_ltm``).  A steady gross
-    margin signals durable unit economics and pricing power -- a hallmark of a
-    well-positioned software franchise (high score); a margin that swings around
-    signals pricing pressure, mix shifts or an unstable cost base (low score).
-    Because gross margin is almost always positive and well bounded, this is the
-    most robust member of the trio -- the near-zero-mean guard rarely binds.
-    """
-    return _neg_coeff_of_variation(p, _gross_margin_series(p))
 
 
 def _f_cashflow_stability(p: pd.DataFrame) -> pd.Series:
     """
-    Cash-flow stability: the negative trailing-36m robust coefficient of
+    Cash-flow stability: the negative trailing-12m robust coefficient of
     variation of the operating cash-flow margin (``operating_cf_ltm /
     sales_ltm``).  A steady cash-flow margin signals real, durable profitability
     -- cash conversion is harder to manage than accrual earnings, so its
     consistency is a classic earnings-quality cross-check (high score); a lumpy
     cash margin flags accrual- or working-capital-driven earnings (low score).
-    The cash-flow cousin of ``gross_margin_stability``: same construction, one
-    line further down the conversion chain from revenue to cash.
+    A margin-consistency signal one line further down the conversion chain from
+    revenue to cash.
     """
     return _neg_coeff_of_variation(p, _ocf_margin_series(p))
 
 
-# --- components of rd_revenue_stability (reproduced verbatim from their home
-#     libraries, so this library stays a self-contained drop-in for the engine) --
-def _rd_stability_raw(p: pd.DataFrame) -> pd.Series:
-    """``rd_stability`` from ``RD/rd_factors.py``: the NEGATIVE trailing-36m
-    coefficient of variation (std / mean) of R&D intensity, undefined when the
-    trailing mean intensity is below ``MIN_MEAN_INTENSITY`` (R&D ~ 0)."""
-    intensity = _rd_intensity_series(p)
-    g = intensity.groupby(p["stock_id"], observed=True)
-    mean = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).mean())
-    std = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std())
-    cov = std / mean.where(mean > MIN_MEAN_INTENSITY)
-    return -cov
-
-
-def _revenue_stability_raw(p: pd.DataFrame) -> pd.Series:
-    """``revenue_stability`` from ``Rev & Cost/revcost_factors.py``: the NEGATIVE
-    trailing-36m standard deviation of YoY revenue (``sales_ltm``) growth."""
-    g = _yoy_growth(p, p["sales_ltm"].astype(float)).replace([np.inf, -np.inf], np.nan)
-    std = (g.groupby(p["stock_id"], observed=True)
-            .transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std()))
-    return -std
-
-
-def _f_rd_revenue_stability(p: pd.DataFrame) -> pd.Series:
+def _f_return_stability(p: pd.DataFrame) -> pd.Series:
     """
-    Combined R&D + revenue stability: the **sum of the cross-sectional z-scores**
-    of ``rd_stability`` and ``revenue_stability``.  The two raw signals are on
-    incomparable scales (a CoV ratio vs the std of a growth rate), so we
-    standardise each within the monthly cross-section first -- exactly as each
-    library z-scores it -- then add, mirroring Experiment 3's composite
-    (``score = sum of z-scores``).  Each component's z-score is taken over its own
-    natural coverage; the sum then exists only where BOTH are present (the
-    R&D-reporting subset), so a high score marks a firm that is steady on *both*
-    its product reinvestment and its top line.
+    Return stability: the negative trailing-12m robust coefficient of variation
+    of the monthly total return.  A high score (return std small relative to its
+    mean) marks a smooth, low-volatility return stream -- the same direction as
+    the low-volatility / high-Sharpe anomaly (steady compounders outperform on a
+    risk-adjusted basis); a very negative score marks an erratic, lottery-like
+    return stream.  Built straight off prices, so unlike the other members it
+    needs no fundamentals and is the most data-complete factor here.
     """
-    z_rd = cross_sectional_zscore(_rd_stability_raw(p), p["period"])
-    z_rev = cross_sectional_zscore(_revenue_stability_raw(p), p["period"])
-    return z_rd + z_rev
+    return _neg_coeff_of_variation(p, _return_series(p))
+
+
+def _f_gross_profitability_stability(p: pd.DataFrame) -> pd.Series:
+    """
+    Gross-profitability stability: the negative trailing-12m robust coefficient
+    of variation of gross profitability (``gross_income_ltm / assets``;
+    Novy-Marx 2013).  It watches the consistency of gross profit
+    *per dollar of assets* -- how productively the asset base
+    is turned into gross profit.  A steady, high gross-profitability path is a
+    durable-quality hallmark (high score); a path that swings around flags an
+    unstable franchise or a churning asset base (low score).  Like gross margin
+    it is almost always positive in software, so the near-zero-mean guard rarely
+    binds.
+    """
+    return _neg_coeff_of_variation(p, _gross_profitability_series(p))
 
 
 _FACTOR_FUNCS = {
     "earning_stability": _f_earning_stability,
     "rd_earning_stability": _f_rd_earning_stability,
-    "gross_margin_stability": _f_gross_margin_stability,
     "cashflow_stability": _f_cashflow_stability,
-    "rd_revenue_stability": _f_rd_revenue_stability,
+    "return_stability": _f_return_stability,
+    "gross_profitability_stability": _f_gross_profitability_stability,
 }
 
 
@@ -517,11 +504,12 @@ def to_long_panel(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 def build(save: bool = True, u: Universe = SOFTWARE_SERVICES) -> pd.DataFrame:
-    """Full build: panel -> factors -> z-scores -> next return -> tidy long."""
+    """Full build: panel -> factors -> next return -> mcap screen -> z-scores -> tidy long."""
     panel = build_monthly_panel(u=u)
     panel = compute_factors(panel)
-    panel = add_zscores(panel)
     panel = add_next_return(panel)
+    panel = apply_mcap_screen(panel, u)
+    panel = add_zscores(panel)
     long = to_long_panel(panel)
     if save:
         u.output_dir.mkdir(parents=True, exist_ok=True)

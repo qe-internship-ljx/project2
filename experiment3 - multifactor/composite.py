@@ -60,6 +60,7 @@ Run standalone::
 
     python composite.py                                          # default set
     python composite.py buyback_quality gross_profitability rd_stability
+    python composite.py top                                       # the active top-5 (Exp 1 + Exp 2)
 """
 
 from __future__ import annotations
@@ -87,18 +88,35 @@ OUTPUT_DIR = EXP3_DIR / "output"
 # (date, stock_id, factor, value, zscore, next_return) carrying the exposures and
 # an alpha table whose ``direction`` column records each factor's bullish sign.
 # A requested factor is resolved against these in order (first match wins), so
-# its source -- panel and orientation -- is always unambiguous.
+# its source -- panel and orientation -- is always unambiguous.  The list spans
+# every Software & Services factor library (Experiment 1's general factors plus
+# all of Experiment 2's software subexperiments), so any factor in Experiment 2's
+# top-factor hand-off resolves.  ``Cross_val/`` is omitted: it lives on the
+# Banks+Insurance universe, a different cross-section.
+def _exp2_lib(folder: str, label: str) -> dict:
+    return {"label": label,
+            "panel": EXP2_DIR / folder / "factor_panel.csv",
+            "alpha": EXP2_DIR / folder / "quintile" / "long_short_market_alpha.csv"}
+
+
 LIBRARIES: list[dict] = [
     {"label": "general market factors",
      "panel": EXP1_DIR / "output" / "software" / "factor_panel.csv",
      "alpha": EXP1_DIR / "output" / "software" / "quintile" / "long_short_market_alpha.csv"},
-    {"label": "software-industry factors",
-     "panel": EXP2_DIR / "Standard" / "factor_panel.csv",
-     "alpha": EXP2_DIR / "Standard" / "quintile" / "long_short_market_alpha.csv"},
-    {"label": "R&D-behaviour factors",
-     "panel": EXP2_DIR / "RD" / "factor_panel.csv",
-     "alpha": EXP2_DIR / "RD" / "quintile" / "long_short_market_alpha.csv"},
+    _exp2_lib("Standard", "software-industry factors"),
+    _exp2_lib("RD", "R&D-behaviour factors"),
+    _exp2_lib("Rev & Cost", "revenue/cost factors"),
+    _exp2_lib("Growth", "growth factors"),
+    _exp2_lib("Stability", "stability factors"),
+    _exp2_lib("Skew", "skew factors"),
 ]
+
+# The cross-experiment top-factor hand-off (written by
+# ``experiment2 - sw factors/main.py``, ranking Experiment 1's general market
+# factors together with every Experiment 2 software subexperiment by alpha
+# t-stat); ``top_factors()`` reads its factor list.
+TOP_FACTORS_CSV = EXP2_DIR / "top_factors" / "top_factors.csv"
+TOP_N = 5
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -140,11 +158,28 @@ def _load_exp1():
 
 
 F, Q, R = _load_exp1()
+import cost as COST                       # registered by _load_exp1; the turnover-cost model
 
 
 # --------------------------------------------------------------------------- #
 # Step 1 -- resolve the requested factors to (source panel, bullish sign)
 # --------------------------------------------------------------------------- #
+def top_factors(csv_path: Path = TOP_FACTORS_CSV, n: int = TOP_N) -> list[str]:
+    """The active top-``n`` factor names from the cross-experiment top-factor
+    hand-off (``top_factors.csv``), ranked by industry-neutral alpha t-stat.
+
+    Reads the *current* file each call, so the composite always tracks whatever
+    factors rank highest after the latest Experiment 1/2 run; the rows are
+    pre-sorted by rank, so the first ``n`` are the leaders.  Raises a clear error
+    if the hand-off is missing."""
+    if not Path(csv_path).exists():
+        raise FileNotFoundError(
+            f"{csv_path} not found.  Run Experiment 2 first -- `python main.py` "
+            "(or `python main.py collect`) in 'experiment2 - sw factors' writes "
+            "the top-factor hand-off.")
+    return pd.read_csv(csv_path)["factor"].head(n).tolist()
+
+
 def resolve_factors(factor_names: list[str]) -> pd.DataFrame:
     """
     Map each requested factor to its source library, family, bullish sign and
@@ -179,6 +214,39 @@ def resolve_factors(factor_names: list[str]) -> pd.DataFrame:
 
     return pd.DataFrame(rows, columns=["factor", "family", "library", "direction",
                                        "sign", "alpha", "alpha_tstat", "panel_path"])
+
+
+def factor_quintile_dir(factor: str) -> Path:
+    """Locate a factor's ``quintile/`` output directory -- the parent of the
+    library alpha table that lists it.  Resolves factors from Experiment 1
+    (general market factors) and any Experiment 2 software subexperiment alike,
+    so a standalone book written by either experiment is found.  Raises if the
+    factor is in no library."""
+    for lib in LIBRARIES:
+        ap = Path(lib["alpha"])
+        if ap.exists() and factor in set(pd.read_csv(ap, usecols=["factor"])["factor"]):
+            return ap.parent
+    raise KeyError(f"factor {factor!r} not found in any library alpha table "
+                   f"({', '.join(l['label'] for l in LIBRARIES)}).")
+
+
+def factor_long_short(factor: str) -> pd.Series:
+    """
+    A single factor's bullish-oriented standalone monthly long/short return,
+    read from its ``quintile/<factor>/quintile_returns.csv`` (the ``Q5-Q1``
+    column) and signed by its bullish ``direction`` (``+`` when the book is long
+    the top z-score quintile, ``-`` otherwise).  Indexed by formation month.
+
+    This is the exact dollar-neutral book each factor's published ``long_short.png``
+    tracks, so it is the natural benchmark to regress another strategy against;
+    no return is recomputed here.  Shared by ``factor_momentum.py`` (rotation
+    candidates) and ``bivariate_tertile.py`` (benchmark-relative alpha).
+    """
+    sign = int(resolve_factors([factor]).iloc[0]["sign"])
+    qr_path = factor_quintile_dir(factor) / factor / "quintile_returns.csv"
+    qr = (pd.read_csv(qr_path, parse_dates=["date"])
+            .set_index("date").sort_index())
+    return (sign * qr["Q5-Q1"]).rename(factor)
 
 
 # --------------------------------------------------------------------------- #
@@ -284,6 +352,55 @@ def industry_return() -> pd.Series:
     return R.industry_monthly_return(F.load_panel(u=F.SOFTWARE_SERVICES))
 
 
+_COST_PANEL: pd.DataFrame | None = None
+
+
+def cost_panel() -> pd.DataFrame:
+    """The Software & Services per-(stock, month) round-trip cost panel, built once
+    and cached.  Shared by every Experiment 3 book so the reported turnover cost
+    uses the project's one cost model (``cost.py``)."""
+    global _COST_PANEL
+    if _COST_PANEL is None:
+        _COST_PANEL = COST.build_cost_panel(F.SOFTWARE_SERVICES)
+    return _COST_PANEL
+
+
+_MCAP_PANEL: pd.DataFrame | None = None
+
+
+def market_cap_panel() -> pd.DataFrame:
+    """Per-``(date, stock_id)`` formation-date USD market cap, built once and
+    cached (tidy ``date, stock_id, mcap``).
+
+    ``mcap`` is the ``weight`` column of the saved Software & Services panel --
+    the month-end USD cap that weights each stock's next-period return, i.e. its
+    market cap at the formation of the return every book earns.  Shared by any
+    Experiment 3 book that needs to describe or size the names it holds."""
+    global _MCAP_PANEL
+    if _MCAP_PANEL is None:
+        panel = F.load_panel(u=F.SOFTWARE_SERVICES)
+        _MCAP_PANEL = (panel.dropna(subset=["weight"])
+                            .drop_duplicates(["date", "stock_id"])
+                            [["date", "stock_id", "weight"]]
+                            .rename(columns={"weight": "mcap"})
+                            .reset_index(drop=True))
+    return _MCAP_PANEL
+
+
+def window_cost(cost_series: pd.Series,
+                start: pd.Timestamp | None = None,
+                end: pd.Timestamp | None = None) -> float:
+    """Average monthly turnover cost over an optional ``[start, end]`` window
+    (fraction of notional).  Reported alongside performance, **not** netted from
+    the alpha or Sharpe -- those stay gross, as in every other project book."""
+    s = cost_series.dropna()
+    if start is not None:
+        s = s[s.index >= start]
+    if end is not None:
+        s = s[s.index <= end]
+    return float(s.mean()) if len(s) else float("nan")
+
+
 def book_stats(spread: pd.Series, industry: pd.Series,
                start: pd.Timestamp | None = None,
                end: pd.Timestamp | None = None) -> dict:
@@ -293,7 +410,7 @@ def book_stats(spread: pd.Series, industry: pd.Series,
     the industry beta and the beta-neutralised Sharpe.
 
     Window-parameterised so the same helper serves the full / past-decade split
-    here and the in-sample / out-of-sample split in ``weighted_composite.py``.
+    here and the walk-forward out-of-sample window in ``weighted_composite.py``.
     All quantities use Experiment 1's own helpers, so "alpha" is defined
     identically to every other long/short book in the project.
     """
@@ -408,19 +525,20 @@ def render_factor_set(resolved: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
-# Metric label + accessor for each row of the performance table; ``book_stats``
-# keys are shared by every variant so this table renders any window set.
-PERF_METRICS: list[tuple[str, str, str]] = [
-    ("Months (n)",                   "n_months",       "int"),
-    ("Mean monthly return",          "mean_monthly",   "pct"),
-    ("t-stat (mean ≠ 0)",            "tstat",          "num"),
-    ("Sharpe (annualised)",          "sharpe",         "num"),
-    ("Industry-neutral α (monthly)", "alpha",          "pct"),
-    ("α t-stat",                     "alpha_tstat",    "num"),
-    ("Industry β",                   "ind_beta",       "num"),
-    ("β-neutral Sharpe",             "sharpe_neutral", "num"),
+# Metric row = (label, stats-key, format, shade).  ``format`` is int/pct/num;
+# ``shade`` True tints the cell by the |t| significance of its own value (used for
+# t-stat rows).  ``book_stats`` keys are shared by every variant so this table
+# renders any window set; callers may append further rows via ``extra_metrics``.
+PERF_METRICS: list[tuple[str, str, str, bool]] = [
+    ("Months (n)",                   "n_months",       "int", False),
+    ("Mean monthly return",          "mean_monthly",   "pct", False),
+    ("t-stat (mean ≠ 0)",            "tstat",          "num", False),
+    ("Sharpe (annualised)",          "sharpe",         "num", False),
+    ("Industry-neutral α (monthly)", "alpha",          "pct", False),
+    ("α t-stat",                     "alpha_tstat",    "num", True),
+    ("Industry β",                   "ind_beta",       "num", False),
+    ("β-neutral Sharpe",             "sharpe_neutral", "num", False),
 ]
-_ALPHA_T_ROW = 5                         # the "α t-stat" row, shaded by significance
 
 
 def _fmt_cell(value, kind: str) -> str:
@@ -430,25 +548,42 @@ def _fmt_cell(value, kind: str) -> str:
 
 
 def render_performance(windows: list[tuple[str, dict]], title: str,
-                       subtitle: str, path: Path) -> None:
+                       subtitle: str, path: Path,
+                       extra_metrics: list[tuple[str, str, str, bool]] | None = None
+                       ) -> None:
     """
     Render long/short performance across one or more named windows as a PNG.
 
     ``windows`` is a list of ``(column_label, stats)`` where ``stats`` is a
     :func:`book_stats` result -- e.g. full vs past-decade, or in-sample vs
-    out-of-sample.  The α t-stat row is shaded by significance per column.
+    out-of-sample.  Rows flagged ``shade`` (the α t-stat, and any shaded
+    ``extra_metrics``) are tinted by significance per column.
+
+    ``extra_metrics`` appends caller-specific rows (same
+    ``(label, key, format, shade)`` shape as :data:`PERF_METRICS`) -- e.g. a
+    strategy's alpha above a benchmark book -- but only those whose key every
+    window carries, so a partially-populated stat is silently skipped rather than
+    raising.  When every window also carries an ``avg_cost`` key an extra trailing
+    row reports it, for information only -- never netted from the gross alpha /
+    Sharpe above.
     """
+    metrics = list(PERF_METRICS)
+    if extra_metrics:
+        metrics += [m for m in extra_metrics if all(m[1] in s for _, s in windows)]
+    if windows and all("avg_cost" in s for _, s in windows):
+        metrics.append(("Avg monthly cost (turnover)", "avg_cost", "pct", False))
+
     headers = ["Metric"] + [label for label, _ in windows]
     cell_text, cell_colors = [], []
-    for i, (name, key, kind) in enumerate(PERF_METRICS):
+    for name, key, kind, shade in metrics:
         cell_text.append([name] + [_fmt_cell(s[key], kind) for _, s in windows])
         colors = ["white"] * (len(windows) + 1)
-        if i == _ALPHA_T_ROW:
+        if shade:
             for j, (_, s) in enumerate(windows, start=1):
-                colors[j] = R._tstat_color(s["alpha_tstat"])
+                colors[j] = R._tstat_color(s[key])
         cell_colors.append(colors)
 
-    nrows, ncols = len(PERF_METRICS), len(windows) + 1
+    nrows, ncols = len(metrics), len(windows) + 1
     metric_w = 0.40
     col_w = [metric_w] + [(1 - metric_w) / len(windows)] * len(windows)
     fig, ax = plt.subplots(figsize=(4.2 + 2.8 * len(windows), 0.5 * (nrows + 1) + 1.6))
@@ -508,6 +643,12 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     windows = [("Full sample", book_stats(spread, industry)),
                ("Past decade (2016+)", book_stats(spread, industry, start=DECADE_START))]
     full, decade = windows[0][1], windows[1][1]
+
+    # Average monthly turnover cost of the Q5-Q1 book (reported, not netted).
+    cost_series = COST.long_short_cost(panel, COMPOSITE_FACTOR, cost_panel(),
+                                       n_quintiles=N_QUINTILES)
+    full["avg_cost"] = window_cost(cost_series)
+    decade["avg_cost"] = window_cost(cost_series, start=DECADE_START)
     meta = {"n_stocks": composite["stock_id"].nunique(),
             "n_months": int(full["n_months"]),
             "start": composite["date"].min(), "end": composite["date"].max()}
@@ -541,8 +682,13 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
 
 
 def main() -> None:
-    factor_names = sys.argv[1:] or DEFAULT_FACTORS
-    run(factor_names)
+    args = sys.argv[1:]
+    if args and args[0] in {"top", "--top"}:
+        # Combine the active cross-experiment top factors into one composite.
+        names = top_factors()
+        run(names, label=f"top{len(names)}")
+    else:
+        run(args or DEFAULT_FACTORS)
 
 
 if __name__ == "__main__":

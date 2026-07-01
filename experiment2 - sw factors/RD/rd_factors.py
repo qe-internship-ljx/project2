@@ -119,6 +119,7 @@ weighted_group_mean = _engine.weighted_group_mean          # used by the injecte
 winsorize_cross_section = _engine.winsorize_cross_section
 cross_sectional_zscore = _engine.cross_sectional_zscore
 add_next_return = _engine.add_next_return
+apply_mcap_screen = _engine.apply_mcap_screen      # generic: point-in-time min-mcap screen
 assign_quintiles = _engine.assign_quintiles
 prepare_slice = _engine.prepare_slice
 ols = _engine.ols
@@ -138,8 +139,8 @@ INDUSTRY_GROUP = "Software & Services"
 
 # Estimation windows / parameters.
 YOY_LAG = 12                # year-over-year lag (months) for flow-change signals
-STAB_WINDOW = 36            # trailing months for the R&D-intensity stability moment
-STAB_MIN_PERIODS = 24       # require >=2y of history before a stability score exists
+STAB_WINDOW = 12            # trailing months for the R&D-intensity stability moment
+STAB_MIN_PERIODS = 9       # require of history before a stability score exists
 MIN_MEAN_INTENSITY = 0.005  # floor on trailing mean R&D/sales below which the
                             # coefficient of variation is undefined (R&D ~ 0)
 
@@ -172,6 +173,7 @@ SOFTWARE_SERVICES = Universe(
     price_file="price_software_services.feather",
     output_dir=OUTPUT_DIR,
     industry_group=INDUSTRY_GROUP,
+    min_mcap_usd=0.1e9,   # point-in-time screen: hold only names >= $0.1B at formation
 )
 
 UNIVERSES: dict[str, Universe] = {SOFTWARE_SERVICES.slug: SOFTWARE_SERVICES}
@@ -390,11 +392,12 @@ def to_long_panel(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 def build(save: bool = True, u: Universe = SOFTWARE_SERVICES) -> pd.DataFrame:
-    """Full build: panel -> factors -> z-scores -> next return -> tidy long."""
+    """Full build: panel -> factors -> next return -> mcap screen -> z-scores -> tidy long."""
     panel = build_monthly_panel(u=u)
     panel = compute_factors(panel)
-    panel = add_zscores(panel)
     panel = add_next_return(panel)
+    panel = apply_mcap_screen(panel, u)
+    panel = add_zscores(panel)
     long = to_long_panel(panel)
     if save:
         u.output_dir.mkdir(parents=True, exist_ok=True)

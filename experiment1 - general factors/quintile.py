@@ -20,9 +20,10 @@ the regression outputs -- see ``regression.py`` -- which signs the book and
 writes ``output/quintile/<factor>/long_short.png`` and the
 ``long_short_market_alpha`` table.)
 
-Run standalone::
-
-    python quintile.py
+This module is a library: :func:`run` is driven by the per-universe
+orchestrators (``software_service.py``, ``banks_insurance.py``,
+``commodity_producers.py``), which build the panel once and reuse it across
+both analyses.
 """
 
 from __future__ import annotations
@@ -134,7 +135,3 @@ def run(panel: pd.DataFrame | None = None,
     summary.to_csv(quintile_dir / "summary.csv", index=False)
     print(f"\nSaved quintile outputs -> {quintile_dir}")
     return summary
-
-
-if __name__ == "__main__":
-    run(u=F.universe_from_argv())

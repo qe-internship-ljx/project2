@@ -20,15 +20,12 @@ one-for-one::
       quintile/    <factor>/...   + summary.csv
                                   + long_short_market_alpha.{csv,png}
       regression/  <factor>/...   + summary.csv + summary_table.png
-      factor_correlation/         redundancy of each Rev & Cost factor vs the existing
-        vs_general/<factor>/...   Exp1 general market factors,
-        vs_software/<factor>/...  the Exp2 "standard" software factors, and ...
-        vs_rd/<factor>/...        ... the Exp2 RD factors (incl. rd_stability, the
-                                  closest cousin of revenue_stability -- see results.md)
+      factor_correlation/<factor>/...   redundancy of each Rev & Cost factor vs
+                                        the Exp1 general market factors
 
 The ``factor_correlation`` step reuses Experiment 3's panel-agnostic
 ``factor_correlation.run`` to quantify how little of each Rev & Cost factor is
-spanned by the pre-existing factors -- the empirical backing for the "not
+spanned by the Exp1 general market factors -- the empirical backing for the "not
 correlated with existing factors" claim in ``Theory & hypothesis.md``.
 
 Run standalone::
@@ -51,7 +48,6 @@ sys.modules["factors"] = R
 # This driver lives in experiment2's "Rev & Cost/" subfolder, so the project root
 # is three parents up (Rev & Cost -> "experiment2 - sw factors" -> project root).
 _EXP1_DIR = Path(__file__).resolve().parent.parent.parent / "experiment1 - general factors"
-_EXP2_DIR = Path(__file__).resolve().parent.parent          # the "experiment2 - sw factors" dir
 _EXP3_DIR = Path(__file__).resolve().parent.parent.parent / "experiment3 - multifactor"
 sys.path.insert(0, str(_EXP1_DIR))
 
@@ -74,40 +70,29 @@ def _load_factor_correlation():
 
 def run_correlation_analysis() -> None:
     """
-    Quantify how much of each Rev & Cost factor is already explained by the
-    existing factors, two ways: vs Experiment 1's 9 general market factors, and vs
-    Experiment 2's established software factors.  Writes one R^2 table per
-    (comparison, factor) under ``Rev & Cost/factor_correlation/``.
+    Quantify how much of each Rev & Cost factor is already explained by
+    Experiment 1's 9 general market factors.  Writes one R^2 table per factor
+    under ``Rev & Cost/factor_correlation/<factor>/``.
     """
     fc = _load_factor_correlation()
 
     rc_panel = UNIVERSE.panel_path                                  # Rev & Cost/factor_panel.csv
     general_panel = _EXP1_DIR / "output" / "software" / "factor_panel.csv"
-    software_panel = _EXP2_DIR / "Standard" / "factor_panel.csv"
-    rd_panel = _EXP2_DIR / "RD" / "factor_panel.csv"
     corr_root = UNIVERSE.output_dir / "factor_correlation"
 
-    comparisons = [
-        ("vs_general", general_panel, "Exp1 general market factors"),
-        ("vs_software", software_panel, "Exp2 software factors"),
-        # The RD factors are the closest existing cousins of these revenue/cost
-        # signals (rd_stability is a 36m fundamental-stability moment like
-        # revenue_stability); this comparison is essential, not optional.
-        ("vs_rd", rd_panel, "Exp2 RD factors"),
-    ]
-    for tag, market_panel, label in comparisons:
-        if not market_panel.exists():
-            print(f"  [skip] {label}: {market_panel} not found "
-                  f"(build that experiment's panel first)")
-            continue
-        print(f"\n--- Redundancy of Rev & Cost factors {tag.replace('_', ' ')} "
-              f"({label}) ---")
-        for factor in R.FACTOR_NAMES:
-            fc.run(target_factor=factor,
-                   target_panel=rc_panel,
-                   market_panel=market_panel,
-                   out_dir=corr_root / tag / factor,
-                   include_market_cap=(tag == "vs_general"))
+    if not general_panel.exists():
+        print(f"  [skip] Exp1 general market factors: {general_panel} not found "
+              f"(build experiment1's software panel first)")
+        return
+
+    print(f"\n--- Redundancy of Rev & Cost factors vs general "
+          f"(Exp1 general market factors) ---")
+    for factor in R.FACTOR_NAMES:
+        fc.run(target_factor=factor,
+               target_panel=rc_panel,
+               market_panel=general_panel,
+               out_dir=corr_root / factor,
+               include_market_cap=True)
 
 
 def main() -> None:

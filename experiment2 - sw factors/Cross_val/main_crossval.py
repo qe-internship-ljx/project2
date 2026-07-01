@@ -22,10 +22,9 @@ one-for-one::
       quintile/    <factor>/...   + summary.csv
                                   + long_short_market_alpha.{csv,png}
       regression/  <factor>/...   + summary.csv + summary_table.png
-      factor_correlation/
-        vs_general/<factor>/...   redundancy of each factor vs the Exp1 general
-                                  market factors on the SAME (banks_insurance)
-                                  universe
+      factor_correlation/<factor>/...   redundancy of each factor vs the Exp1
+                                        general market factors on the SAME
+                                        (banks_insurance) universe
 
 Universe note
 -------------
@@ -89,7 +88,7 @@ def run_correlation_analysis() -> None:
     """
     Quantify how much of each cross-validated factor is already explained by the
     Experiment 1 general market factors *on the same banks_insurance universe*.
-    Writes one R^2 table per factor under ``Cross_val/factor_correlation/vs_general/``.
+    Writes one R^2 table per factor under ``Cross_val/factor_correlation/<factor>/``.
     """
     fc = _load_factor_correlation()
 
@@ -108,7 +107,7 @@ def run_correlation_analysis() -> None:
         fc.run(target_factor=factor,
                target_panel=target_panel,
                market_panel=general_panel,
-               out_dir=corr_root / "vs_general" / factor,
+               out_dir=corr_root / factor,
                include_market_cap=True)
 
 

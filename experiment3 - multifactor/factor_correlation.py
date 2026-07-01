@@ -248,7 +248,9 @@ def factor_r2_table(target_factor: str,
     joint_r2, joint_n = _joint_r2(y, joined[market_factors].to_numpy())
     joint_row = {"market_factor": "__joint__", "family": "all market factors",
                  "n_obs": joint_n, "corr": np.nan, "r2": joint_r2, "slope": np.nan}
-    table = pd.concat([table, pd.DataFrame(extra_rows + [joint_row])],
+    # JOINT closes off the market-factor set; the size row sits below it as an
+    # informational add-on (it is not part of the joint fit).
+    table = pd.concat([table, pd.DataFrame([joint_row] + extra_rows)],
                       ignore_index=True)
     table.attrs["target_factor"] = target_factor
     table.attrs["regressor_col"] = regressor_col

@@ -23,10 +23,10 @@ Two ways to weight the constituents, sharing one spine:
 | Module | Combination | Weights | Evaluation |
 |---|---|---|---|
 | [`composite.py`](composite.py) | equal-weighted (straight sum) | each factor's bullish sign `±1` | full sample + past decade |
-| [`weighted_composite.py`](weighted_composite.py) | coefficient-weighted | in-sample (≤2015) regression premia | **out-of-sample (2016+)** |
+| [`weighted_composite.py`](weighted_composite.py) | coefficient-weighted | **expanding-window** regression premia, refit every month | **walk-forward out-of-sample (2007+)** |
 
 The weighted variant is described under
-[Coefficient-weighted variant](#coefficient-weighted-variant-out-of-sample--weighted_compositepy);
+[Coefficient-weighted variant](#coefficient-weighted-variant-expanding-window-walk-forward--weighted_compositepy);
 the rest of this section covers the equal-weighted `composite.py`.
 
 ## What it does (`composite.py`)
@@ -70,7 +70,7 @@ before importing the analysis modules, exactly as Experiment 2's `main.py` does:
 | Factor **exposures** (the z-scores) | Exp 1, Exp 2 & R&D `output/.../factor_panel.csv` | read as written |
 | Factor **orientation** (bullish sign) | Exp 1, Exp 2 & R&D `output/.../long_short_market_alpha.csv` | read as written |
 | Composite construction + per-set reporting | `composite.py` | **new (this experiment)** |
-| In-sample premium regression + train/test split | `weighted_composite.py` | **new (this experiment)** |
+| Expanding-window premium regression + walk-forward | `weighted_composite.py` | **new (this experiment)** |
 
 This experiment therefore adds only the composite construction and its reporting;
 every input it consumes was already produced upstream. The pipeline is factor-set
@@ -78,7 +78,8 @@ agnostic — any factor produced by Experiments 1–2 (or the R&D extension) can
 combined by name. `composite.py` exposes the shared spine (`load_exposures`,
 `scored_frame`, `as_factor_panel`, `industry_return`, `book_stats`,
 `plot_cumulative` / `plot_long_short` / `render_performance`); the weighted
-variant reuses all of it and adds only the regression and the split.
+variant reuses all of it and adds only the equal-weighted benchmark and the
+expanding-window walk-forward.
 
 ## Run
 
@@ -87,7 +88,7 @@ python composite.py                                          # equal-weighted, d
 python composite.py buyback_quality gross_profitability rd_stability
 python -c "from composite import run; run(['earnings_yield','sue','beta'])"
 
-python weighted_composite.py                                 # coefficient-weighted, OOS test
+python weighted_composite.py                                 # coefficient-weighted, expanding-window walk-forward
 python weighted_composite.py buyback_quality gross_profitability rd_stability
 ```
 
@@ -140,76 +141,82 @@ and are unchanged.
   (−0.21) — its quality/stability tilt outperforms in down-industry months — so
   beta-hedging lifts the Sharpe from 0.80 to **0.94** (full) / **1.02** (2016+).
 - **Robust across the past decade.** The alpha is essentially unchanged in the
-  2016+ re-estimation (1.21%/mo, t = 3.08), not a pre-2010 artifact. (For a strict
-  train-on-≤2019 / test-on-2020+ holdout, see the weighted variant below.)
+  2016+ re-estimation (1.21%/mo, t = 3.08), not a pre-2010 artifact. (For a genuine
+  walk-forward holdout with weights refit every month, see the weighted variant below.)
 
-## Coefficient-weighted variant (out-of-sample) — `weighted_composite.py`
+## Coefficient-weighted variant (expanding-window walk-forward) — `weighted_composite.py`
 
 Instead of an equal-weighted straight sum, weight each constituent by its
-**estimated return premium**: fit the factors in-sample, use the regression
-coefficients as the composite weights, and test the resulting strategy strictly
-out-of-sample. The default set here is **`buyback_quality` + `rd_stability`**, with
-the split at **in-sample ≤2015 / out-of-sample 2016+** (both configurable via
-`IS_END` / `OOS_START`).
+**estimated return premium**, re-estimated **every month on an expanding window**
+and traded strictly walk-forward. The default set here is **`revenue_stability` +
+`gross_profitability`**, with an initial training period through **2006** and the
+book traded from **2007 onwards** (configurable via `INITIAL_TRAIN_END`).
 
-1. **In-sample premia (≤2015).** Pool every in-sample stock-month and regress the
-   **normalised return** — the stock's month-(t+1) return minus that month's
-   market-cap-weighted industry average (the within-industry "market") — on the
-   formation-date factor z-scores: `(r_{i,t+1} − market_{t+1}) = a + Σ b_f·z_{f,i,t} + ε`.
-   The slopes `b_f` are each factor's in-sample premium, reported with OLS and
-   month-clustered t-stats.
-2. **Weighted score.** For every stock-month, `score_{i,t} = Σ b_f·z_{f,i,t}` —
-   the model's predicted industry-relative return (intercept dropped; it doesn't
-   affect the cross-sectional ranking). Sort into quintiles, long Q5 / short Q1.
-3. **Out-of-sample test (≥2016).** The fixed in-sample weights are applied to the
-   2016+ cross-sections; that window's Q5−Q1 performance is the headline. The
-   weights never see post-2015 data, so it is a genuine holdout.
+For each formation month `t` after the initial training period:
 
-### In-sample premia = the weights (≤2015)
+1. **Expanding-window premia.** Pool every stock-month **strictly before `t`** —
+   look-ahead free, only returns already realised by `t` enter — and regress the
+   **normalised return** on the formation-date factor z-scores:
+   `(r_{i,t+1} − market_{t+1}) = a + Σ b_f·z_{f,i,t} + ε`. The slopes `b_f(t)` are
+   that month's premia, with OLS and month-clustered t-stats. The subtracted
+   `market` is the **unweighted (equal-weighted)** industry average, so the
+   normalisation is not dominated by the few mega-cap software names.
+2. **Weighted score.** Score month `t`'s cross-section with those weights,
+   `score_{i,t} = Σ b_f(t)·z_{f,i,t}` — the model's predicted industry-relative
+   return (intercept dropped; it doesn't affect the cross-sectional ranking). Sort
+   into quintiles, long Q5 / short Q1, hold over `t+1`.
+3. **Walk-forward.** The window expands one month and step 1 repeats, so **every
+   traded month is out-of-sample**: the weights forming month `t`'s book never saw
+   `t`'s (or any later) return. There is no single fixed train/test split — the
+   whole 2007+ path is the holdout.
 
-| Term | Coef (= weight, ind-rel %/mo per 1σ) | t (OLS) | t (cluster) |
+### Full-sample premia (reference)
+
+`coefficients.{csv,png}` report the whole-period regression (t-stats over the
+**entire** sample) for reference; the traded book uses the expanding-window
+weights, not these.
+
+| Term | Coef (= premium, ind-rel %/mo per 1σ) | t (OLS) | t (cluster) |
 |---|---:|---:|---:|
-| intercept | +0.787% | +11.05 | **+3.16** |
-| `buyback_quality` | +0.229% | +2.82 | **+1.98** |
-| `rd_stability` | +0.121% | +1.64 | +1.11 |
+| intercept | +0.043% | +1.09 | +1.02 |
+| `revenue_stability` | +0.074% | +1.83 | +0.90 |
+| `gross_profitability` | +0.264% | +6.41 | **+4.66** |
 
-With `gross_profitability` dropped, `buyback_quality` carries the larger in-sample
-premium (≈2× `rd_stability`); both enter with the expected positive sign. (The
-intercept is larger than before because the normalised return is now relative to the
-**market-cap-weighted** — and therefore lower — industry mean; it is dropped from the
-score and does not affect the cross-sectional ranking.)
+`gross_profitability` carries the dominant, strongly significant premium;
+`revenue_stability` adds a smaller positive tilt. How each weight and its t-stat
+evolve as the window grows is plotted in `beta_path.png` / `tstat_path.png` — the
+`gross_profitability` weight drifts down from ~0.57%→~0.26% as more (lower-premium)
+history accrues, but its clustered t-stat stays firmly above 4 throughout.
 
-### In-sample vs out-of-sample (Q5−Q1 book)
+### Walk-forward Q5−Q1 book (2007+)
 
-| Metric | In-sample (≤2015, 193 mo) | **Out-of-sample (2016+, 120 mo)** |
-|---|---:|---:|
-| Mean monthly | +0.530% | +0.479% |
-| t-stat | +1.23 | +1.11 |
-| Sharpe (ann.) | +0.31 | +0.35 |
-| Industry-neutral α (monthly) | +0.607% | +0.909% |
-| α t-stat | +1.56 | **+2.13** |
-| Industry β | −0.36 | −0.28 |
-| β-neutral Sharpe | +0.39 | +0.70 |
+| Metric | **Walk-forward OOS (2007+, 228 mo)** |
+|---|---:|
+| Mean monthly | +0.513% |
+| t-stat | +2.61 |
+| Sharpe (ann.) | +0.60 |
+| Industry-neutral α (monthly) | +0.644% |
+| α t-stat | **+3.25** |
+| Industry β | −0.11 |
+| β-neutral Sharpe | +0.77 |
+| Avg monthly cost (turnover) | +0.044% |
 
 **Takeaways.**
-- **The weighting generalises here — OOS even beats in-sample.** The industry-
-  neutral α *rises* from 0.61%/mo (t = 1.56) in-sample to 0.91%/mo (t = 2.13) on
-  the 2016+ holdout. Unlike the earlier `gross_profitability`-dominated 3-factor
-  fit, the two-factor weights don't overfit, so they hold up out-of-sample.
-- **A defensive, hedge-then-judge book.** Both windows carry a *negative*
-  industry beta (≈ −0.3): the buyback-quality + R&D-stability tilt does best when
-  the industry falls. The raw mean return is therefore modest (+0.48%/mo, t = 1.11
-  OOS — the negative beta drags the unhedged return down in a rising industry), but
-  the **industry-neutral** α is significant out-of-sample, and β-hedging lifts the OOS
-  Sharpe from 0.35 to **0.70**. This is a book to run market-neutral, not outright.
-- **Robust split.** Cutting in-sample at 2015 leaves a full 120-month (2016–2025)
-  holdout; the dashed line in `quintile_cumulative.png` / `long_short.png` marks
-  the IS/OOS boundary.
+- **The weighting holds up out-of-sample.** Refitting the premia every month on
+  only prior data still yields a significant industry-neutral α of 0.64%/mo
+  (t = 3.25) across the full 228-month walk-forward — no fixed-split cherry-picking.
+- **Near industry-neutral outright.** The book carries only a small negative
+  industry β (−0.11), so the raw mean (+0.51%/mo, t = 2.61) is itself significant;
+  β-hedging lifts the Sharpe modestly from 0.60 to 0.77.
+- **Stable weights.** `beta_path.png` shows both weights are smooth and never flip
+  sign; the ranking is driven throughout by `gross_profitability`, with
+  `revenue_stability` a steady secondary tilt.
 
-Outputs land under `output/weighted/<slug>/`: `coefficients.{csv,png}` (the
-premia/weights), `quintile_returns.csv`, `quintile_cumulative.png` and
-`long_short.png` (both with the 2016 split marked), and `performance.png`
-(in-sample vs out-of-sample).
+Outputs land under `output/weighted/<slug>/`: `coefficients.{csv,png}` (full-sample
+reference premia), `beta_path.{csv,png}` and `tstat_path.{csv,png}` (the
+expanding-window weights and t-stats over time), `long_short.png` (the walk-forward
+book's growth of $1), and `performance.png` (the walk-forward summary). No quintile
+files are written — the sort is an internal step.
 
 ## Factor redundancy — `factor_correlation.py`
 

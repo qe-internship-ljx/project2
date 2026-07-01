@@ -47,9 +47,10 @@ z-score, with OLS and month-clustered t-stats (full sample and 2016+).  The
 ``output/quintile/long_short_market_alpha`` table additionally carries each
 book's industry-neutral alpha and its **average turnover cost** (pp/month).
 
-Run standalone::
-
-    python regression.py
+This module is a library: :func:`run` is driven by the per-universe
+orchestrators (``software_service.py``, ``banks_insurance.py``,
+``commodity_producers.py``), which build the panel once and reuse it across
+both analyses.
 """
 
 from __future__ import annotations
@@ -532,7 +533,8 @@ def _fmt_num(x: float, prec: int = 2) -> str:
     return f"{x:+.{prec}f}" if np.isfinite(x) else "—"
 
 
-def render_alpha_table(rows: pd.DataFrame, path: Path) -> None:
+def render_alpha_table(rows: pd.DataFrame, path: Path,
+                       title: str | None = None) -> None:
     """
     Render the per-factor long-short-vs-industry regression as a PNG table.
 
@@ -542,6 +544,10 @@ def render_alpha_table(rows: pd.DataFrame, path: Path) -> None:
     repeats the alpha, its t-stat, the annualised Sharpe and the beta-neutralised
     Sharpe estimated on the past decade (2016+) only.  Alpha t-stats are shaded
     by absolute significance.
+
+    ``title`` overrides the figure's suptitle; when ``None`` (the default) the
+    standard quintile-book caption is used, so existing callers are unchanged.
+    A book built on a different bucketing (e.g. tertiles) passes its own title.
     """
     cols = ["factor", "family", "direction",
             "alpha", "alpha_tstat", "sharpe", "sharpe_neutral", "avg_cost_pp", "n",
@@ -585,9 +591,10 @@ def render_alpha_table(rows: pd.DataFrame, path: Path) -> None:
         tbl[i, 0].set_text_props(ha="left")
         tbl[i, 1].set_text_props(ha="left")
 
-    fig.suptitle("Long-short quintile strategy regressed on the industry return\n"
-                 "(ls_t = α + β·industry_t + ε;  α = industry-neutral monthly "
-                 "return, t-stat tests α ≠ 0)", fontsize=11, y=0.99)
+    default_title = ("Long-short quintile strategy regressed on the industry return\n"
+                     "(ls_t = α + β·industry_t + ε;  α = industry-neutral monthly "
+                     "return, t-stat tests α ≠ 0)")
+    fig.suptitle(default_title if title is None else title, fontsize=11, y=0.99)
     fig.text(0.5, 0.015, "Shaded alpha t-stats: |t| ≥ 1.65 (10%), darker |t| ≥ 2.0 (5%).  "
              "Sharpe = annualised Sharpe of the L/S book.  Avg cost = mean monthly "
              "turnover cost (one-way, traded weight only).  2016+ columns re-estimate "
@@ -739,7 +746,3 @@ def run(panel: pd.DataFrame | None = None,
     print(f"Saved long-short alpha table -> "
           f"{quintile_dir / 'long_short_market_alpha.png'}")
     return summary
-
-
-if __name__ == "__main__":
-    run(u=F.universe_from_argv())
