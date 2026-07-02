@@ -3,8 +3,9 @@ main_crossval.py
 ================
 
 Experiment 2 driver for the **cross-validation** library (``crossval_factors.py``):
-re-test ``rd_stability`` (from ``RD/``) and ``revenue_stability`` (from
-``Rev & Cost/``) on the **Banks + Insurance** universe, using the *same pipeline*
+re-test Experiment 2's **top ``TOP_N`` factors** (the leaders of the
+``top_factors/top_factors.csv`` hand-off, resolved to their source libraries) on
+the **Banks + Insurance + Commodity Producers** universe, using the *same pipeline*
 as the ``Stability/`` subfolder.
 
 Identical wiring to ``main_stability.py``: Experiment 1's ``quintile.py`` /
@@ -12,10 +13,10 @@ Identical wiring to ``main_stability.py``: Experiment 1's ``quintile.py`` /
 ``import factors as F``; we register ``crossval_factors`` under that name in
 ``sys.modules`` *before* importing them, so the entire analysis -- quintile
 sorts, cross-sectional (Fama-MacBeth) regressions, dollar-neutral long/short
-books, industry-neutral alpha and average turnover cost -- runs against the two
-cross-validated factors with zero changes to Experiment 1.  Outputs land directly
-in this ``Cross_val/`` folder, mirroring the Experiment 1 / Experiment 2 layout
-one-for-one::
+books, industry-neutral alpha and average turnover cost -- runs against the
+cross-validated top factors with zero changes to Experiment 1.  Outputs land
+directly in this ``Cross_val/`` folder, mirroring the Experiment 1 / Experiment 2
+layout one-for-one::
 
     Cross_val/
       factor_panel.csv
@@ -28,21 +29,23 @@ one-for-one::
 
 Universe note
 -------------
-This driver runs on ``crossval_factors.BANKS_INSURANCE`` -- ``gics_industry_name
-in {'Banks', 'Insurance'}`` -- the same universe Experiment 1 evaluates.  The
-"industry-neutral alpha" the quintile step reports is therefore the L/S book's
-alpha vs the cap-weighted banks+insurance ("market") return, the natural analog
-of the software industry-neutral alpha.
+This driver runs on ``crossval_factors.BANKS_COMMODITY`` -- the union of Banks +
+Insurance and Commodity Producers (``gics_industry_name`` in {Banks, Insurance,
+Metals & Mining, Oil, Gas & Consumable Fuels}) -- with the same market-cap screen
+the software libraries apply.  The "industry-neutral alpha" the quintile step
+reports is therefore the L/S book's alpha vs the cap-weighted return of this
+combined cross-section (a **universe-neutral** alpha).
 
 Redundancy comparison
 ----------------------
-The ``factor_correlation`` step is run **only vs the Experiment 1 general market
-factors built on this same banks_insurance universe**
-(``experiment1 - general factors/output/banks_insurance/factor_panel.csv``).
-Unlike ``Stability/``, we do NOT compare against the Exp2 software / R&D / Rev&Cost
-panels: those are built on the *software* cross-section, so their stock_ids do not
-overlap this universe and an R^2 against them would be meaningless.  The
-same-universe general-factor table is the only valid redundancy benchmark here.
+The ``factor_correlation`` step is run **vs the Experiment 1 general market factors
+built on this same combined universe** -- built on demand by
+``crossval_factors.build_general_market_panel`` (reusing Experiment 1's engine) and
+cached under ``Cross_val/general_market/factor_panel.csv``.  Only a same-universe
+general-factor table is a valid redundancy benchmark, so the panel must share this
+universe's cross-section.  (A top factor that *is* an Experiment 1 general factor --
+e.g. ``gross_profitability`` -- is trivially explained by itself in this table; its
+self-R^2 is expected ~1.)
 
 Run standalone::
 
@@ -70,7 +73,7 @@ sys.path.insert(0, str(_EXP1_DIR))
 import quintile        # noqa: E402  (import after sys.modules / sys.path wiring)
 import regression      # noqa: E402
 
-UNIVERSE = C.BANKS_INSURANCE
+UNIVERSE = C.BANKS_COMMODITY
 
 
 def _load_factor_correlation():
@@ -87,22 +90,17 @@ def _load_factor_correlation():
 def run_correlation_analysis() -> None:
     """
     Quantify how much of each cross-validated factor is already explained by the
-    Experiment 1 general market factors *on the same banks_insurance universe*.
+    Experiment 1 general market factors *on the same combined universe*.
     Writes one R^2 table per factor under ``Cross_val/factor_correlation/<factor>/``.
     """
     fc = _load_factor_correlation()
 
     target_panel = UNIVERSE.panel_path                              # Cross_val/factor_panel.csv
-    general_panel = _EXP1_DIR / "output" / "banks_insurance" / "factor_panel.csv"
+    general_panel = C.build_general_market_panel()                  # built on demand, same universe
     corr_root = UNIVERSE.output_dir / "factor_correlation"
 
-    if not general_panel.exists():
-        print(f"  [skip] Exp1 general factors: {general_panel} not found "
-              f"(build experiment1's banks_insurance panel first)")
-        return
-
     print(f"\n--- Redundancy of cross-validated factors vs general "
-          f"(Exp1 general market factors, banks_insurance universe) ---")
+          f"(Exp1 general market factors, banks+insurance+commodity universe) ---")
     for factor in C.FACTOR_NAMES:
         fc.run(target_factor=factor,
                target_panel=target_panel,
@@ -112,8 +110,9 @@ def run_correlation_analysis() -> None:
 
 
 def main() -> None:
+    scope = ", ".join(UNIVERSE.industries) if UNIVERSE.industries else "entire market"
     print(f"=== Building cross-validation factor panel: {UNIVERSE.slug} "
-          f"(industries: {', '.join(UNIVERSE.industries)}) ===")
+          f"({scope}) ===")
     panel = C.build(save=True, u=UNIVERSE)
     n_months = panel["date"].nunique()
     n_stocks = panel["stock_id"].nunique()
@@ -121,7 +120,7 @@ def main() -> None:
           f"({panel['date'].min():%Y-%m} .. {panel['date'].max():%Y-%m})")
     print(f"  Factors: {', '.join(C.FACTOR_NAMES)}")
     # Coverage per factor is itself part of the finding (rd_stability needs an R&D
-    # programme, which banks/insurers rarely report).
+    # programme, which banks, insurers and resource firms largely do not report).
     counts = panel.groupby("factor")["value"].size().reindex(C.FACTOR_NAMES)
     for name, c in counts.items():
         print(f"    {name:<22} {c:>8,} stock-months")

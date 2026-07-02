@@ -427,6 +427,30 @@ def book_stats(spread: pd.Series, industry: pd.Series,
             "sharpe_neutral": R.beta_neutral_sharpe(s, mkt, mreg["beta"])}
 
 
+def attach_net_cost_sharpe(stats: dict, spread: pd.Series, cost_series: pd.Series,
+                           industry: pd.Series,
+                           start: pd.Timestamp | None = None,
+                           end: pd.Timestamp | None = None) -> dict:
+    """
+    Add the **cost-incorporated Sharpe** to a :func:`book_stats` window dict, in
+    place, so :func:`render_performance` can show it beside the gross Sharpe.
+
+    Sets two keys: ``sharpe_cost`` (Experiment 1's :func:`regression.net_of_cost_sharpe`
+    -- the annualised Sharpe of the book's gross spread less its per-month turnover
+    cost) and ``sharpe_cost_neutral`` (:func:`regression.net_of_cost_neutral_sharpe`
+    -- the same net series hedged with ``-beta*industry`` using the window's gross
+    industry beta ``stats['ind_beta']``, the identical hedge ratio behind
+    ``sharpe_neutral``).  ``start`` / ``end`` window it exactly as ``book_stats``.
+    The cost model / alignment is Experiment 1's, so this cost-incorporated Sharpe
+    is defined identically to every other book's.
+    """
+    stats["sharpe_cost"] = R.net_of_cost_sharpe(spread, cost_series, start=start, end=end)
+    stats["sharpe_cost_neutral"] = R.net_of_cost_neutral_sharpe(
+        spread, cost_series, industry, stats.get("ind_beta", np.nan),
+        start=start, end=end)
+    return stats
+
+
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
@@ -565,9 +589,22 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
     window carries, so a partially-populated stat is silently skipped rather than
     raising.  When every window also carries an ``avg_cost`` key an extra trailing
     row reports it, for information only -- never netted from the gross alpha /
-    Sharpe above.
+    Sharpe above.  When every window carries the cost-incorporated Sharpe keys
+    (``sharpe_cost`` / ``sharpe_cost_neutral``, e.g. via
+    :func:`attach_net_cost_sharpe`) a combined "Sharpe net of cost" row is inserted
+    beside the gross Sharpe -- the raw and beta-neutral net-of-cost Sharpe in one
+    cell (``raw / β-neut``).
     """
     metrics = list(PERF_METRICS)
+    # Cost-incorporated Sharpe sits next to the gross β-neutral Sharpe when every
+    # window carries both net-of-cost variants (raw and β-neutral).
+    if windows and all("sharpe_cost" in s and "sharpe_cost_neutral" in s
+                       for _, s in windows):
+        net_row = ("Sharpe net of cost (raw / β-neut)", "sharpe_cost", "net_sharpe", False)
+        anchor = next((i for i, m in enumerate(metrics) if m[1] == "sharpe_neutral"),
+                      next((i for i, m in enumerate(metrics) if m[1] == "sharpe"),
+                           len(metrics) - 1))
+        metrics.insert(anchor + 1, net_row)
     if extra_metrics:
         metrics += [m for m in extra_metrics if all(m[1] in s for _, s in windows)]
     if windows and all("avg_cost" in s for _, s in windows):
@@ -576,7 +613,12 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
     headers = ["Metric"] + [label for label, _ in windows]
     cell_text, cell_colors = [], []
     for name, key, kind, shade in metrics:
-        cell_text.append([name] + [_fmt_cell(s[key], kind) for _, s in windows])
+        if kind == "net_sharpe":       # combined raw / β-neutral net-of-cost Sharpe
+            cell_text.append([name] + [
+                f"{R._fmt_num(s['sharpe_cost'])} / {R._fmt_num(s['sharpe_cost_neutral'])}"
+                for _, s in windows])
+        else:
+            cell_text.append([name] + [_fmt_cell(s[key], kind) for _, s in windows])
         colors = ["white"] * (len(windows) + 1)
         if shade:
             for j, (_, s) in enumerate(windows, start=1):
@@ -644,11 +686,14 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
                ("Past decade (2016+)", book_stats(spread, industry, start=DECADE_START))]
     full, decade = windows[0][1], windows[1][1]
 
-    # Average monthly turnover cost of the Q5-Q1 book (reported, not netted).
+    # Average monthly turnover cost of the Q5-Q1 book (reported, not netted) plus
+    # the cost-incorporated Sharpe (raw + β-neutral) derived from the same series.
     cost_series = COST.long_short_cost(panel, COMPOSITE_FACTOR, cost_panel(),
                                        n_quintiles=N_QUINTILES)
     full["avg_cost"] = window_cost(cost_series)
     decade["avg_cost"] = window_cost(cost_series, start=DECADE_START)
+    attach_net_cost_sharpe(full, spread, cost_series, industry)
+    attach_net_cost_sharpe(decade, spread, cost_series, industry, start=DECADE_START)
     meta = {"n_stocks": composite["stock_id"].nunique(),
             "n_months": int(full["n_months"]),
             "start": composite["date"].min(), "end": composite["date"].max()}

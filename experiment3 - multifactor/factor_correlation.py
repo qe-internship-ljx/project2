@@ -330,7 +330,7 @@ def render_r2_table(table: pd.DataFrame, path: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def run(target_factor: str = "buyback_quality",
+def run(target_factor: str,
         target_panel: Path = TARGET_PANEL,
         market_panel: Path = MARKET_PANEL,
         regressor_col: str = REGRESSOR_COL,
@@ -360,10 +360,3 @@ def run(target_factor: str = "buyback_quality",
     print(f"Saved -> {out_dir}\n")
     return table
 
-
-def main() -> None:
-    run(target_factor="buyback_quality")
-
-
-if __name__ == "__main__":
-    main()

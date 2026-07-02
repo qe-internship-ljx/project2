@@ -311,6 +311,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     cost_series = C.COST.long_short_cost(panel, C.COMPOSITE_FACTOR, C.cost_panel(),
                                          n_quintiles=C.N_QUINTILES)
     stats["avg_cost"] = C.window_cost(cost_series)
+    C.attach_net_cost_sharpe(stats, spread, cost_series, industry)
     windows = [(win_label, stats)]
 
     # --- Persist outputs --------------------------------------------------- #

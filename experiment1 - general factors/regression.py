@@ -173,6 +173,59 @@ def beta_neutral_sharpe(spread: pd.Series, market: pd.Series, beta: float) -> fl
     return long_short_stats(hedged)["sharpe"]
 
 
+def _net_of_cost_spread(spread: pd.Series, cost_series: pd.Series,
+                        start: pd.Timestamp | None = None,
+                        end: pd.Timestamp | None = None) -> pd.Series:
+    """The long-short book's monthly return **net of turnover cost** over an optional
+    ``[start, end]`` window: the gross spread less the per-formation-month turnover
+    cost (:func:`cost.long_short_cost` / :func:`cost.turnover_cost`), aligned on the
+    spread's month index (a month with no recorded cost is charged zero)."""
+    net = spread.subtract(cost_series.reindex(spread.index).fillna(0.0))
+    if start is not None:
+        net = net[net.index >= start]
+    if end is not None:
+        net = net[net.index <= end]
+    return net
+
+
+def net_of_cost_sharpe(spread: pd.Series, cost_series: pd.Series,
+                       start: pd.Timestamp | None = None,
+                       end: pd.Timestamp | None = None) -> float:
+    """
+    Annualised Sharpe of the long-short book's return **net of turnover cost**.
+
+    Trading cost is a per-month drag charged on turnover, so netting it from the
+    gross spread (:func:`_net_of_cost_spread`) and taking the standard annualised
+    Sharpe gives the risk-adjusted return an investor actually realises after paying
+    to trade the book -- the cost-incorporated counterpart of the gross ``sharpe``
+    every book also reports.  Returns NaN if the net series is empty.
+    """
+    return long_short_stats(_net_of_cost_spread(spread, cost_series, start, end))["sharpe"]
+
+
+def net_of_cost_neutral_sharpe(spread: pd.Series, cost_series: pd.Series,
+                               market: pd.Series, beta: float,
+                               start: pd.Timestamp | None = None,
+                               end: pd.Timestamp | None = None) -> float:
+    """
+    Annualised Sharpe of the **industry-beta-neutralised, net-of-cost** book.
+
+    Combines :func:`net_of_cost_sharpe` and :func:`beta_neutral_sharpe`: net the
+    turnover cost from the gross spread, then hedge that net series' industry
+    exposure with a ``-beta`` overlay in the industry return (``beta`` is the book's
+    gross exposure over the same window, the identical hedge ratio behind
+    ``sharpe_neutral``).  This is the cost-incorporated counterpart of the
+    beta-neutral Sharpe.  Returns NaN if ``beta`` is not finite or the series empty.
+    """
+    net = _net_of_cost_spread(spread, cost_series, start, end)
+    mkt = market
+    if start is not None:
+        mkt = mkt[mkt.index >= start]
+    if end is not None:
+        mkt = mkt[mkt.index <= end]
+    return beta_neutral_sharpe(net, mkt, beta)
+
+
 # --------------------------------------------------------------------------- #
 # Long-short return regressed on the industry ("market") return
 # --------------------------------------------------------------------------- #
@@ -533,54 +586,87 @@ def _fmt_num(x: float, prec: int = 2) -> str:
     return f"{x:+.{prec}f}" if np.isfinite(x) else "—"
 
 
+def _fmt_stat_cell(value: float, tstat: float, is_pct: bool) -> str:
+    """Stack a coefficient over its t-stat in one table cell, e.g.
+    ``"+1.25%\\n(t +4.33)"`` (alpha) or ``"-0.30\\n(t -5.20)"`` (beta)."""
+    head = _fmt_pct(value) if is_pct else _fmt_num(value)
+    tail = f"(t {tstat:+.2f})" if np.isfinite(tstat) else "(t —)"
+    return f"{head}\n{tail}"
+
+
+def _fmt_net_sharpe_cell(raw: float, neutral: float) -> str:
+    """Stack the two cost-incorporated Sharpes in one table cell: the raw
+    net-of-cost Sharpe over the industry-beta-neutralised net-of-cost Sharpe, e.g.
+    ``"+0.58\\n(βn +0.92)"``.  Both are the return net of turnover cost."""
+    bot = f"(βn {neutral:+.2f})" if np.isfinite(neutral) else "(βn —)"
+    return f"{_fmt_num(raw)}\n{bot}"
+
+
 def render_alpha_table(rows: pd.DataFrame, path: Path,
                        title: str | None = None) -> None:
     """
     Render the per-factor long-short-vs-industry regression as a PNG table.
 
-    Full-sample columns: the industry-neutral alpha and its t-stat, the book's
-    annualised Sharpe ratio, its average turnover cost and the industry-beta-
-    neutralised Sharpe (the book hedged with -beta*industry).  A trailing block
-    repeats the alpha, its t-stat, the annualised Sharpe and the beta-neutralised
-    Sharpe estimated on the past decade (2016+) only.  Alpha t-stats are shaded
-    by absolute significance.
+    Each window (full sample, then the trailing 2016+ block) carries two combined
+    coefficient cells: the industry-neutral **alpha** stacked over its t-stat, and
+    the book's **market (industry) beta** stacked over its t-stat, alongside the
+    annualised Sharpe, the industry-beta-neutralised Sharpe (the book hedged with
+    -beta*industry), a combined **cost-incorporated Sharpe** cell (the raw
+    net-of-cost Sharpe stacked over its beta-neutral net-of-cost counterpart) and
+    the average turnover cost.  Alpha cells are shaded by the absolute significance
+    of their t-stat.
+
+    The cost-incorporated Sharpe fields (``sharpe_cost`` / ``sharpe_cost_neutral``
+    full, ``sharpe_cost_2016`` / ``sharpe_cost_neutral_2016`` for the decade) are
+    read defensively so a table built before they were populated still renders (the
+    cell shows "—").
 
     ``title`` overrides the figure's suptitle; when ``None`` (the default) the
     standard quintile-book caption is used, so existing callers are unchanged.
     A book built on a different bucketing (e.g. tertiles) passes its own title.
+
+    Beta fields (``beta``/``beta_tstat`` full, ``beta_2016``/``beta_tstat_2016``
+    for the decade) are read defensively so a table built before they were
+    populated still renders (the beta cell shows "—").
     """
-    cols = ["factor", "family", "direction",
-            "alpha", "alpha_tstat", "sharpe", "sharpe_neutral", "avg_cost_pp", "n",
-            "alpha_2016", "alpha_tstat_2016", "sharpe_2016", "sharpe_neutral_2016"]
     headers = ["Factor", "Family", "L/S\ndirection",
-               "Alpha\n(monthly)", "Alpha\nt-stat",
-               "Sharpe\n(ann.)", "β-neutral\nSharpe", "Avg cost\n(monthly)", "n",
-               "Alpha\n(2016+)", "Alpha t\n(2016+)", "Sharpe\n(2016+)", "β-neutral\nSh (2016+)"]
+               "Alpha (monthly)\n& t-stat", "Market β\n& t-stat",
+               "Sharpe\n(ann.)", "β-neutral\nSharpe",
+               "Sharpe net cost\n(raw / β-neut)", "Avg cost\n(monthly)", "n",
+               "Alpha (2016+)\n& t-stat", "Market β (2016+)\n& t-stat",
+               "Sharpe\n(2016+)", "β-neutral\nSh (2016+)",
+               "Sharpe net cost\n(2016+, raw/β-n)"]
 
     cell_text, cell_colors = [], []
-    for _, r in rows[cols].iterrows():
+    for _, r in rows.iterrows():
         cell_text.append([
             r["factor"], r["family"], r["direction"],
-            _fmt_pct(r["alpha"]), _fmt_num(r["alpha_tstat"]),
+            _fmt_stat_cell(r["alpha"], r["alpha_tstat"], True),
+            _fmt_stat_cell(r.get("beta", np.nan), r.get("beta_tstat", np.nan), False),
             _fmt_num(r["sharpe"]), _fmt_num(r["sharpe_neutral"]),
+            _fmt_net_sharpe_cell(r.get("sharpe_cost", np.nan),
+                                 r.get("sharpe_cost_neutral", np.nan)),
             f"{-r['avg_cost_pp'] / 100:+.4%}", f"{int(r['n'])}",
-            _fmt_pct(r["alpha_2016"]), _fmt_num(r["alpha_tstat_2016"]),
+            _fmt_stat_cell(r["alpha_2016"], r["alpha_tstat_2016"], True),
+            _fmt_stat_cell(r.get("beta_2016", np.nan), r.get("beta_tstat_2016", np.nan), False),
             _fmt_num(r["sharpe_2016"]), _fmt_num(r["sharpe_neutral_2016"]),
+            _fmt_net_sharpe_cell(r.get("sharpe_cost_2016", np.nan),
+                                 r.get("sharpe_cost_neutral_2016", np.nan)),
         ])
         cell_colors.append([
             "white", "white", "white",
-            "white", _tstat_color(r["alpha_tstat"]),
-            "white", "white", "#fde7d6", "white",
-            "white", _tstat_color(r["alpha_tstat_2016"]), "white", "white",
+            _tstat_color(r["alpha_tstat"]), "white",
+            "white", "white", "white", "#fde7d6", "white",
+            _tstat_color(r["alpha_tstat_2016"]), "white", "white", "white", "white",
         ])
 
     n = len(rows)
-    fig, ax = plt.subplots(figsize=(16.5, 0.45 * (n + 1) + 1.4))
+    fig, ax = plt.subplots(figsize=(18.5, 0.62 * (n + 1) + 1.4))
     ax.axis("off")
 
     tbl = ax.table(cellText=cell_text, colLabels=headers, cellColours=cell_colors,
-                   colWidths=[0.13, 0.15, 0.07, 0.075, 0.06, 0.06, 0.078,
-                              0.068, 0.036, 0.075, 0.06, 0.058, 0.09],
+                   colWidths=[0.10, 0.115, 0.05, 0.078, 0.07, 0.045, 0.05,
+                              0.075, 0.055, 0.026, 0.078, 0.07, 0.045, 0.05, 0.075],
                    cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(9)
@@ -593,12 +679,15 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
 
     default_title = ("Long-short quintile strategy regressed on the industry return\n"
                      "(ls_t = α + β·industry_t + ε;  α = industry-neutral monthly "
-                     "return, t-stat tests α ≠ 0)")
+                     "return, β = net industry exposure)")
     fig.suptitle(default_title if title is None else title, fontsize=11, y=0.99)
-    fig.text(0.5, 0.015, "Shaded alpha t-stats: |t| ≥ 1.65 (10%), darker |t| ≥ 2.0 (5%).  "
-             "Sharpe = annualised Sharpe of the L/S book.  Avg cost = mean monthly "
-             "turnover cost (one-way, traded weight only).  2016+ columns re-estimate "
-             "α on the past decade only.",
+    fig.text(0.5, 0.015, "Each coefficient cell stacks the estimate over its t-stat.  "
+             "Shaded alpha t-stats: |t| ≥ 1.65 (10%), darker |t| ≥ 2.0 (5%).  "
+             "Market β = book's slope on the industry return.  Sharpe = annualised "
+             "Sharpe of the L/S book.  Sharpe net cost = annualised Sharpe of the book's "
+             "return net of turnover cost (top = raw L/S, bottom βn = industry-β-neutralised).  "
+             "Avg cost = mean monthly turnover cost (one-way, traded weight only).  "
+             "2016+ columns re-estimate on the past decade only.",
              ha="center", fontsize=8, color="#555555")
     fig.subplots_adjust(left=0.02, right=0.98, top=0.80, bottom=0.10)
     fig.savefig(path, dpi=150)
@@ -680,9 +769,17 @@ def run(panel: pd.DataFrame | None = None,
             industry_ret[industry_ret.index >= DECADE_START],
             mreg_2016["beta"])
 
-        # Average turnover cost incurred by the book (pp/month).
-        avg_cost_pp = cost.average_cost(
-            cost.long_short_cost(panel, factor, cost_panel, N_QUINTILES)) * 100.0
+        # Turnover cost incurred by the book (per formation month): its time-series
+        # mean (pp/month) is reported, and it also nets the gross spread for the
+        # cost-incorporated Sharpe (raw and beta-neutral, full sample and 2016+).
+        cost_series = cost.long_short_cost(panel, factor, cost_panel, N_QUINTILES)
+        avg_cost_pp = cost.average_cost(cost_series) * 100.0
+        sharpe_cost = net_of_cost_sharpe(spread, cost_series)
+        sharpe_cost_neutral = net_of_cost_neutral_sharpe(
+            spread, cost_series, industry_ret, mreg["beta"])
+        sharpe_cost_2016 = net_of_cost_sharpe(spread, cost_series, start=DECADE_START)
+        sharpe_cost_neutral_2016 = net_of_cost_neutral_sharpe(
+            spread, cost_series, industry_ret, mreg_2016["beta"], start=DECADE_START)
 
         ls_dir = quintile_dir / factor
         ls_dir.mkdir(parents=True, exist_ok=True)
@@ -697,12 +794,17 @@ def run(panel: pd.DataFrame | None = None,
             "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
             "sharpe": ls["sharpe"],
             "avg_cost_pp": avg_cost_pp,
+            "sharpe_cost": sharpe_cost,
+            "sharpe_cost_neutral": sharpe_cost_neutral,
             "r2": mreg["r2"], "n": mreg["n"],
             "sharpe_neutral": sr_neutral,
             "alpha_2016": mreg_2016["alpha"],
             "alpha_tstat_2016": mreg_2016["alpha_tstat"],
             "sharpe_2016": ls_2016["sharpe"],
             "sharpe_neutral_2016": sr_neutral_2016,
+            "sharpe_cost_2016": sharpe_cost_2016,
+            "sharpe_cost_neutral_2016": sharpe_cost_neutral_2016,
+            "beta_2016": mreg_2016["beta"],
             "beta_tstat_2016": mreg_2016["beta_tstat"],
             "r2_2016": mreg_2016["r2"],
         })

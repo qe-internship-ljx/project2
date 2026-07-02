@@ -2,118 +2,107 @@
 vol_timing.py
 =============
 
-Experiment 4 -- **volatility-regime timing** of a single factor book.
+Experiment 4 -- **volatility-regime timing** of the top software factors.
 
-This is the first module of Experiment 4 ("timing"): instead of proposing a new
-factor, it asks whether an *existing* factor's long/short book can be improved by
-only holding it in a chosen market regime.  Concretely it tests the
-``revenue_stability`` factor (Experiment 2's Rev & Cost library -- the negative
-trailing-36m std of YoY revenue growth, long high) under a **vol-of-vol timing
-rule**:
+The first timing module.  Rather than proposing a new factor, it asks whether an
+*existing* factor's long/short book can be improved by only holding it in a chosen
+market regime.  The rule, applied to each of Experiment 2's top-ranked factors
+(the same hand-off ``spread_timing.py`` uses):
 
     On each monthly rebalance day (formation month-end ``t``), enter the
-    dollar-neutral Q5-Q1 ``revenue_stability`` book for month ``t+1`` *only if*
-    the 10-trading-day moving average of the CBOE VVIX (vol-of-vol) index as of
-    that day is above 95; otherwise sit in cash (0 return) for that month.
+    dollar-neutral Q5-Q1 book for month ``t+1`` *only if* the 10-trading-day
+    moving average of the CBOE VVIX (vol-of-vol) index as of that day is above 95;
+    otherwise sit in cash (0 return) for that month.
 
-The economic prior: ``revenue_stability`` is a defensive, negative-industry-beta
-"durability" signal (see the project memory) -- the durability premium should pay
-best when vol-of-vol is elevated (stressed, risk-off regimes), and add little
-churn/risk in calm regimes.  VVIX (the vol of VIX) is a forward-looking gauge of
-tail-risk demand, so a high 10-day VVIX average flags exactly those regimes.  We
-therefore compare the **always-on** book against the **timed** book over the
-common sample for which the timing signal exists (VVIX history starts 2006-03).
+The economic prior: VVIX (the vol of VIX) is a forward-looking gauge of tail-risk
+demand, so a high 10-day VVIX average flags stressed, risk-off regimes.  The
+overlay tests whether the top factors' premia pay best in exactly those regimes.
+Both the VVIX moving average at ``t`` and the threshold comparison are known at
+``t`` (they read the last VVIX observation on or before the rebalance day), so the
+rule is strictly look-ahead free.  Because exiting and re-entering the book is
+itself a trade, the **turnover cost** of the timing overlay is charged explicitly
+(full liquidation on exit, re-establishment on re-entry) and the timed book is
+compared to the always-on book on an after-cost basis, over the common sample for
+which the timing signal exists (VVIX history starts 2006-03).
 
-Engine reuse (the project's standard dependency-injection convention)
----------------------------------------------------------------------
-The factor panel, the directionally-signed Q5-Q1 book, the cap-weighted industry
-("market") return, and every performance statistic (industry-neutral alpha,
-beta-neutral Sharpe, annualised Sharpe) are reused **verbatim** from Experiment
-1's ``regression.py`` driven by Experiment 2's ``Rev & Cost/revcost_factors.py``
-factor library: we load ``revcost_factors`` by path, register it as
-``sys.modules["factors"]`` so ``regression.py`` binds to it, and then build the
-``revenue_stability`` book exactly as ``main_revcost.py`` would.  Only the timing
-overlay and its evaluation are new here.
+The candidate factors are exactly Experiment 2's top-factor hand-off
+(``experiment2 - sw factors/top_factors/top_factors.csv``), so re-running
+Experiment 2's ``collect`` step re-points this module automatically.
+
+Engine reuse (the project's dependency-injection convention)
+------------------------------------------------------------
+Nothing generic is re-implemented -- the wiring mirrors ``spread_timing.py``:
+
+* each factor's signed Q5-Q1 long/short return is read through
+  ``factor_momentum.signed_spread`` (the published ``quintile_returns.csv``,
+  oriented by the factor's bullish ``direction``) -- no return is recomputed;
+* every performance statistic (industry-neutral alpha + t, industry beta,
+  beta-neutral Sharpe) comes from ``composite.book_stats`` / ``industry_return``,
+  so "alpha" is defined identically to every other long/short book in the project;
+* the trading cost is Experiment 1's ``cost.long_short_cost`` with an ``active``
+  mask so it prices the timing overlay.
+
+This module adds **only** the VVIX-regime timing signal and its evaluation.
 
 Run standalone::
 
     python vol_timing.py
 
-Outputs land under ``experiment4 - timing/output/vol_timing/``:
+The single output is one consolidated performance table under
+``experiment4 - timing/output/vol_timing/``:
 
-    timing_comparison.csv   always-on vs timed: mean, t-stat, Sharpe, industry-
-                            neutral alpha (+t) & beta, beta-neutral Sharpe, months
-                            in-market -- full signal sample and 2016+.
-    cumulative.png          cumulative growth of $1, always-on vs timed, with the
-                            in-market (VVIX-MA>95) months shaded.
-    signal_timeline.png     the 10-day VVIX moving average vs the threshold.
+    vol_timing_performance.png   ONE consolidated performance table (project house
+                                 style, one row per factor x book): gross (cost-free)
+                                 L/S & beta-neutral Sharpe, the combined after-cost
+                                 ("Sharpe net cost") Sharpe, industry-neutral alpha
+                                 & beta, average cost -- full sample and 2016+
 """
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 # --------------------------------------------------------------------------- #
-# Paths & dependency injection (mirror main_revcost.py's wiring)
+# Paths & dependency injection -- reuse Experiment 3's composite plumbing
 # --------------------------------------------------------------------------- #
 _THIS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _THIS_DIR.parent
-_EXP1_DIR = _PROJECT_ROOT / "experiment1 - general factors"
-_REVCOST_DIR = _PROJECT_ROOT / "experiment2 - sw factors" / "Rev & Cost"
+_EXP3_DIR = _PROJECT_ROOT / "experiment3 - multifactor"
+sys.path.insert(0, str(_EXP3_DIR))
 
+import composite as C        # noqa: E402  loads the engine (factors/cost/quintile/regression)
+import factor_momentum as FM  # noqa: E402  signed standalone L/S books from quintile_returns.csv
+import cost as COST          # noqa: E402  registered in sys.modules by composite, bound to the engine
 
-def _load_revcost():
-    """Load Experiment 2's Rev & Cost factor library by path (its folder name
-    contains spaces, so it cannot be imported normally)."""
-    spec = importlib.util.spec_from_file_location(
-        "revcost_factors", _REVCOST_DIR / "revcost_factors.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-R = _load_revcost()
-
-# Make Experiment 1's analysis modules bind to the Rev & Cost library, then
-# import the regression engine (whose helpers we reuse for every statistic).
-sys.modules["factors"] = R
-sys.path.insert(0, str(_EXP1_DIR))
-
-import regression  # noqa: E402  (import after sys.modules / sys.path wiring)
+F = C.F                      # the Experiment 1 engine, wired for the software universe
 
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-FACTOR = "revenue_stability"
+TOP_FACTORS_CSV = C.TOP_FACTORS_CSV
 VVIX_SECURITY = "VVIX Index"
 VVIX_MA_WINDOW = 10          # trading-day moving-average window of VVIX
 VVIX_THRESHOLD = 95.0        # enter the book only when the 10d VVIX MA exceeds this
-DECADE_START = pd.Timestamp("2016-01-01")   # "past decade" cut-off (engine convention)
-MONTHS_PER_YEAR = 12
+DECADE_START = C.DECADE_START                 # 2016-01-01, the project "past decade" cut-off
+OUTPUT_DIR = _THIS_DIR / "output"
 
-OUTPUT_DIR = _THIS_DIR / "output" / "vol_timing"
+UNIVERSE = F.SOFTWARE_SERVICES                # every top factor lives on this cross-section
 
 
 # --------------------------------------------------------------------------- #
-# Timing signal: 10-day moving average of VVIX as of each rebalance day
+# Step 1 -- the VVIX timing signal (a market-wide, factor-independent overlay)
 # --------------------------------------------------------------------------- #
 def vvix_ma_series() -> pd.DataFrame:
     """Daily 10-trading-day moving average of the VVIX close.
 
-    Returns a frame ``[date, vvix_ma]`` (sorted, no NaNs) ready for an as-of
-    merge onto the monthly rebalance dates.  The moving average requires a full
+    Returns a frame ``[date, vvix_ma]`` (sorted, no NaNs) ready for an as-of merge
+    onto the monthly rebalance dates.  The moving average requires a full
     ``VVIX_MA_WINDOW`` window, so the first few daily observations are dropped.
     """
-    raw = pd.read_csv(R.DATA_DIR / "VolatilityIndexData.csv")
+    raw = pd.read_csv(F.DATA_DIR / "VolatilityIndexData.csv")
     vv = raw[raw["SECURITY"] == VVIX_SECURITY].copy()
     vv["date"] = pd.to_datetime(vv["DATE"])
     vv["vvix"] = pd.to_numeric(vv["INDEX_VALUE"], errors="coerce")
@@ -124,184 +113,196 @@ def vvix_ma_series() -> pd.DataFrame:
     return vv.dropna(subset=["vvix_ma"])[["date", "vvix_ma"]].reset_index(drop=True)
 
 
-def timing_signal(rebalance_dates: pd.DatetimeIndex) -> pd.DataFrame:
-    """For each monthly rebalance date, the 10d VVIX MA *as of that day* and the
-    resulting in-market flag (``vvix_ma > VVIX_THRESHOLD``).
+def timing_flag(rebalance_dates: pd.DatetimeIndex) -> pd.Series:
+    """In-market flag (``vvix_ma > VVIX_THRESHOLD``) for each monthly rebalance date.
 
-    The MA is read with a backward as-of merge -- the last VVIX observation on or
-    before the rebalance day -- so a month-end that is not itself a trading day
-    still reads the most recent value (no look-ahead).  Rebalance dates earlier
-    than the first available MA carry NaN and are excluded by the caller.
+    The 10d VVIX MA is read with a backward as-of merge -- the last VVIX
+    observation on or before the rebalance day -- so a month-end that is not itself
+    a trading day still reads the most recent value (no look-ahead).  Rebalance
+    dates earlier than the first available MA carry NaN (the signal is undefined and
+    the caller excludes them from both books).
     """
     ma = vvix_ma_series()
     dates = (pd.DataFrame({"date": pd.to_datetime(rebalance_dates)})
                .sort_values("date").reset_index(drop=True))
-    asof = pd.merge_asof(dates, ma, on="date", direction="backward")
-    asof["in_market"] = asof["vvix_ma"] > VVIX_THRESHOLD
-    return asof.set_index("date")
+    asof = pd.merge_asof(dates, ma, on="date", direction="backward").set_index("date")
+    return (asof["vvix_ma"] > VVIX_THRESHOLD).where(asof["vvix_ma"].notna()).rename("in_market")
 
 
 # --------------------------------------------------------------------------- #
-# Book construction & evaluation (all statistics reused from regression.py)
+# Step 2 -- build & evaluate one factor's always-on vs timed book (after cost)
 # --------------------------------------------------------------------------- #
-def revenue_stability_book(panel: pd.DataFrame) -> tuple[pd.Series, int]:
-    """The directionally-signed Q5-Q1 ``revenue_stability`` long/short spread,
-    indexed by formation month-end.  Direction follows the factor library's
-    canonical prior (``higher_is_bullish`` -> long Q5 / short Q1)."""
-    return regression.long_short_portfolio(panel, FACTOR, fm_tstat=np.nan)
+def _win(s: pd.Series, start: pd.Timestamp | None) -> pd.Series:
+    return s if start is None else s[s.index >= start]
 
 
-def evaluate(book: pd.Series, industry_ret: pd.Series,
-             start: pd.Timestamp | None = None) -> dict:
-    """Performance of a monthly book over an optional ``>= start`` window, using
-    the engine's own statistics: annualised Sharpe & mean/t-stat of the book, its
-    industry-neutral alpha (and t-stat) and industry beta from a regression on the
-    cap-weighted industry return, and the industry-beta-neutralised Sharpe."""
-    b = book if start is None else book[book.index >= start]
-    ind = industry_ret if start is None else industry_ret[industry_ret.index >= start]
-    ls = regression.long_short_stats(b)
-    mreg = regression.market_regression(b, ind)
-    sr_neutral = regression.beta_neutral_sharpe(b, ind, mreg["beta"])
-    return {
-        "mean_monthly": ls["mean_monthly"], "tstat": ls["tstat"],
-        "sharpe": ls["sharpe"], "ann_return": ls["ann_return"],
-        "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
-        "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
-        "sharpe_neutral": sr_neutral, "n_months": ls["n_months"],
+WINDOWS: list[tuple[str, pd.Timestamp | None]] = [("full", None), ("2016+", DECADE_START)]
+
+
+def evaluate_factor(factor: str, subexperiment: str, direction: str,
+                    panel: pd.DataFrame, cost_panel: pd.DataFrame,
+                    industry: pd.Series) -> pd.DataFrame:
+    """
+    Build the always-on and VVIX-timed books for one factor and tabulate their
+    gross and after-cost performance over the full sample and 2016+.
+
+    Returns the tidy ``comparison`` stats table (one row per book x window): the
+    gross (cost-free) mean / t / Sharpe / industry-neutral alpha & beta, and the
+    net-of-cost (after-cost) counterparts, plus the average turnover cost and the
+    fraction of months in market.  The market-alpha regression (gross and net) is
+    estimated over the in-market months only, so the timed book's alpha is not
+    diluted by the exact-zero cash months; mean / t / Sharpe still cover the full
+    timed series including those months.
+    """
+    gross = FM.signed_spread(subexperiment, factor, direction)        # bullish Q5-Q1 book
+    in_market_all = timing_flag(gross.index)
+
+    # Common sample: months with both a traded return and a defined timing signal.
+    eval_index = gross.index.intersection(in_market_all.dropna().index).sort_values()
+    base = gross.reindex(eval_index)
+    flag = in_market_all.reindex(eval_index).astype(bool)
+    timed_gross = base.where(flag, 0.0)                                # cash (0) when out of market
+
+    # Turnover cost: always-on (continuous) vs the timing overlay (exit/re-enter).
+    cost_always = COST.long_short_cost(panel, factor, cost_panel).reindex(eval_index).fillna(0.0)
+    cost_timed = COST.long_short_cost(panel, factor, cost_panel, active=flag).reindex(eval_index).fillna(0.0)
+
+    books = {
+        "always_on": (base, cost_always, pd.Series(True, index=eval_index)),
+        "timed":     (timed_gross, cost_timed, flag),
     }
 
+    rows = []
+    for book, (gross_s, cost_s, active_s) in books.items():
+        net_s = gross_s - cost_s
+        # The market-alpha regression uses only the in-market months: an
+        # out-of-market month is cash (an exact 0 with no industry exposure), so
+        # including it would mechanically shrink both alpha and beta toward zero.
+        # For the always-on book the mask is all-True and rg/rn coincide with sg/sn.
+        reg_gross, reg_net = gross_s[active_s], net_s[active_s]
+        for win_name, start in WINDOWS:
+            sg = C.book_stats(gross_s, industry, start=start)
+            sn = C.book_stats(net_s, industry, start=start)
+            rg = C.book_stats(reg_gross, industry, start=start)
+            rn = C.book_stats(reg_net, industry, start=start)
+            rows.append({
+                "factor": factor, "book": book, "window": win_name,
+                "gross_mean": sg["mean_monthly"], "gross_tstat": sg["tstat"],
+                "gross_sharpe": sg["sharpe"], "gross_alpha": rg["alpha"],
+                "gross_alpha_tstat": rg["alpha_tstat"],
+                "ind_beta": rg["ind_beta"], "ind_beta_tstat": rg["ind_beta_tstat"],
+                "sharpe_neutral": sg["sharpe_neutral"],
+                "avg_cost": float(_win(cost_s, start).mean()),
+                "net_mean": sn["mean_monthly"], "net_tstat": sn["tstat"],
+                "net_sharpe": sn["sharpe"], "net_alpha": rn["alpha"],
+                "net_alpha_tstat": rn["alpha_tstat"],
+                "net_sharpe_neutral": sn["sharpe_neutral"],
+                "pct_in_market": float(_win(active_s, start).mean()),
+                "n_months": int(sg["n_months"]),
+            })
+
+    return pd.DataFrame(rows)
+
 
 # --------------------------------------------------------------------------- #
-# Plotting
+# Consolidated performance table (project house style, one row per factor x book)
 # --------------------------------------------------------------------------- #
-def _shade_in_market(ax, signal: pd.Series) -> None:
-    """Shade the spans of consecutive in-market (VVIX-MA>95) months."""
-    s = signal.sort_index()
-    dates = s.index
-    in_run = False
-    start = None
-    for i, d in enumerate(dates):
-        on = bool(s.iloc[i])
-        if on and not in_run:
-            start, in_run = d, True
-        if in_run and (not on or i == len(dates) - 1):
-            end = d if not on else d
-            ax.axvspan(start, end, color="C1", alpha=0.12, lw=0)
-            in_run = False
+_PERF_TITLE = (
+    "VVIX-regime timing: always-on vs vol-timed long-short performance\n"
+    f"(hold the Q5-Q1 book only when the {VVIX_MA_WINDOW}d VVIX moving average exceeds "
+    f"{VVIX_THRESHOLD:g};  α = industry-neutral monthly return,  "
+    "Sharpe net cost = after-cost Sharpe)")
 
 
-def plot_cumulative(base: pd.Series, timed: pd.Series, signal: pd.Series,
-                    stats_base: dict, stats_timed: dict, path: Path) -> None:
-    cum_base = (1.0 + base.fillna(0.0)).cumprod()
-    cum_timed = (1.0 + timed.fillna(0.0)).cumprod()
-    fig, ax = plt.subplots(figsize=(11, 5))
-    _shade_in_market(ax, signal)
-    ax.plot(cum_base.index, cum_base, color="C0", linewidth=1.3,
-            label=f"always-on  [Sharpe={stats_base['sharpe']:+.2f}, "
-                  f"alpha={stats_base['alpha']:+.4%}/mo, t={stats_base['alpha_tstat']:+.2f}]")
-    ax.plot(cum_timed.index, cum_timed, color="C3", linewidth=1.3,
-            label=f"VVIX-timed  [Sharpe={stats_timed['sharpe']:+.2f}, "
-                  f"alpha={stats_timed['alpha']:+.4%}/mo, t={stats_timed['alpha_tstat']:+.2f}]")
-    ax.axhline(1.0, color="black", linewidth=0.6)
-    ax.set_title("revenue_stability Q5-Q1: always-on vs VVIX-timed\n"
-                 f"(enter only when {VVIX_MA_WINDOW}d VVIX MA > {VVIX_THRESHOLD:g}; "
-                 "shaded = in-market months)")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Cumulative value of $1")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
-
-
-def plot_signal(asof: pd.DataFrame, path: Path) -> None:
-    fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(asof.index, asof["vvix_ma"], color="C4", linewidth=1.0,
-            label=f"{VVIX_MA_WINDOW}d VVIX moving average")
-    ax.axhline(VVIX_THRESHOLD, color="C3", linewidth=1.0, linestyle="--",
-               label=f"threshold = {VVIX_THRESHOLD:g}")
-    ax.fill_between(asof.index, VVIX_THRESHOLD, asof["vvix_ma"],
-                    where=asof["vvix_ma"] > VVIX_THRESHOLD,
-                    color="C1", alpha=0.25, interpolate=True)
-    ax.set_title("Timing signal: 10-day moving average of CBOE VVIX at each "
-                 "monthly rebalance day")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("VVIX (10d MA)")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
+def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[dict]:
+    """The always-on and VVIX-timed :func:`regression.render_alpha_table` rows for
+    one factor.  The gross (cost-free) L/S Sharpe and β-neutral Sharpe come from the
+    always-on / timed book unchanged; the combined "Sharpe net cost" column carries
+    this experiment's after-cost (net) raw and β-neutral Sharpe.  Alpha and industry
+    β are the gross book's, matching every other experiment's table (cost is shown
+    via the net-of-cost Sharpe and the average-cost column, not netted from α)."""
+    rows = []
+    for book, family in (("always_on", "always-on"), ("timed", "vol-timed")):
+        sub = comparison[comparison["book"] == book].set_index("window")
+        full, dec = sub.loc["full"], sub.loc["2016+"]
+        rows.append({
+            "factor": factor, "family": family, "direction": direction,
+            "alpha": full["gross_alpha"], "alpha_tstat": full["gross_alpha_tstat"],
+            "beta": full["ind_beta"], "beta_tstat": full["ind_beta_tstat"],
+            "sharpe": full["gross_sharpe"], "sharpe_neutral": full["sharpe_neutral"],
+            "sharpe_cost": full["net_sharpe"],
+            "sharpe_cost_neutral": full["net_sharpe_neutral"],
+            "avg_cost_pp": full["avg_cost"] * 100.0, "n": int(full["n_months"]),
+            "alpha_2016": dec["gross_alpha"], "alpha_tstat_2016": dec["gross_alpha_tstat"],
+            "beta_2016": dec["ind_beta"], "beta_tstat_2016": dec["ind_beta_tstat"],
+            "sharpe_2016": dec["gross_sharpe"], "sharpe_neutral_2016": dec["sharpe_neutral"],
+            "sharpe_cost_2016": dec["net_sharpe"],
+            "sharpe_cost_neutral_2016": dec["net_sharpe_neutral"],
+        })
+    return rows
 
 
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def run() -> pd.DataFrame:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def _pick(comparison: pd.DataFrame, book: str, window: str, col: str) -> float:
+    m = comparison[(comparison["book"] == book) & (comparison["window"] == window)]
+    return float(m[col].iloc[0])
 
-    print(f"=== Experiment 4: VVIX-regime timing of '{FACTOR}' ===")
-    panel = R.load_panel(u=R.SOFTWARE_SERVICES)
 
-    # The directionally-signed Q5-Q1 book and the cap-weighted industry return,
-    # both built exactly as the Rev & Cost pipeline does.
-    spread, sign = revenue_stability_book(panel)
-    industry_ret = regression.industry_monthly_return(panel)
-    direction = "Q5-Q1" if sign > 0 else "Q1-Q5"
-    print(f"  book direction: {direction} (canonical long high-stability)")
-    print(f"  book months: {spread.dropna().size} "
-          f"({spread.index.min():%Y-%m} .. {spread.index.max():%Y-%m})")
+def run(csv_path: Path = TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
+    """Test every top factor under the VVIX-timing rule and write the single
+    consolidated performance table."""
+    top = FM.load_top_factors(csv_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Timing signal on the book's own rebalance (formation month-end) dates, then
-    # restrict to the common sample where the signal is defined (VVIX from 2006).
-    asof = timing_signal(spread.index)
-    sig = asof.dropna(subset=["vvix_ma"])["in_market"]
-    eval_index = spread.index.intersection(sig.index).sort_values()
+    print("=== Experiment 4: VVIX-regime timing of the top factors ===")
+    print(f"Candidates ({len(top)}): " + ", ".join(
+        f"{r.factor} [{r.subexperiment}]" for r in top.itertuples()))
+    print(f"Rule: hold the Q5-Q1 book in month t+1 only if the {VVIX_MA_WINDOW}d VVIX "
+          f"moving average at t exceeds {VVIX_THRESHOLD:g} (after-cost).")
 
-    base = spread.reindex(eval_index)
-    in_market = sig.reindex(eval_index).astype(bool)
-    timed = base.where(in_market, 0.0)   # cash (0 return) when out of market
+    # Built once and shared: the within-industry "market" return and the cost panel
+    # (every top factor trades the same Software & Services cross-section).
+    industry = C.industry_return()
+    cost_panel = COST.build_cost_panel(UNIVERSE)
 
-    pct_in = float(in_market.mean())
-    pct_in_2016 = float(in_market[in_market.index >= DECADE_START].mean())
-    print(f"  signal sample: {eval_index.min():%Y-%m} .. {eval_index.max():%Y-%m} "
-          f"({len(eval_index)} months); in-market {in_market.sum()}/{len(eval_index)} "
-          f"= {pct_in:.1%} of months (VVIX {VVIX_MA_WINDOW}d MA > {VVIX_THRESHOLD:g})")
+    perf_rows = []
+    print("\n  factor                  book        a_net/mo   a_net_t  cost/mo  %in   n")
+    for r in top.itertuples():
+        # Resolve the factor's source panel through composite (its library map),
+        # so a top factor from Experiment 1 (General) resolves as readily as one
+        # from an Experiment 2 subexperiment -- the hard-coded EXP2 path would miss
+        # it.  Same convention factor_momentum uses for the signed book.
+        panel_path = C.resolve_factors([r.factor]).iloc[0]["panel_path"]
+        panel = pd.read_csv(panel_path, parse_dates=["date"])
+        panel["stock_id"] = panel["stock_id"].astype(str)
 
-    # Evaluate both books on the identical sample (full signal window + 2016+).
-    rows = []
-    for label, book in (("always_on", base), ("vvix_timed", timed)):
-        for win_name, start in (("full", None), ("2016+", DECADE_START)):
-            s = evaluate(book, industry_ret, start=start)
-            s["book"] = label
-            s["window"] = win_name
-            s["pct_in_market"] = pct_in if start is None else pct_in_2016
-            rows.append(s)
-    comparison = pd.DataFrame(rows)[[
-        "book", "window", "mean_monthly", "tstat", "sharpe", "ann_return",
-        "alpha", "alpha_tstat", "beta", "beta_tstat", "sharpe_neutral",
-        "pct_in_market", "n_months"]]
-    comparison.to_csv(OUTPUT_DIR / "timing_comparison.csv", index=False)
+        comparison = evaluate_factor(
+            r.factor, r.subexperiment, r.direction, panel, cost_panel, industry)
+        perf_rows.extend(_perf_rows(comparison, r.factor, r.direction))
 
-    # Console summary (ASCII only -- Windows cp1252 stdout).
-    print("\n  book        window  mean/mo   t     Sharpe  alpha/mo   a_t   "
-          "ind_beta  bn_Sharpe   n")
-    for _, r in comparison.iterrows():
-        print(f"  {r['book']:<11} {r['window']:<6} "
-              f"{r['mean_monthly']:+.4%} {r['tstat']:+5.2f} "
-              f"{r['sharpe']:+6.2f}  {r['alpha']:+.4%} {r['alpha_tstat']:+5.2f}  "
-              f"{r['beta']:+7.3f}  {r['sharpe_neutral']:+7.2f}  {int(r['n_months']):>4}")
+        for book in ("always_on", "timed"):
+            print(f"  {r.factor:<22} {book:<11} "
+                  f"{_pick(comparison, book, 'full', 'net_alpha'):+.4%} "
+                  f"{_pick(comparison, book, 'full', 'net_alpha_tstat'):+7.2f}  "
+                  f"{_pick(comparison, book, 'full', 'avg_cost') * 100:6.4f}  "
+                  f"{_pick(comparison, book, 'full', 'pct_in_market'):4.0%}  "
+                  f"{int(_pick(comparison, book, 'full', 'n_months')):>4}")
 
-    # Plots.
-    plot_cumulative(base, timed, in_market,
-                    evaluate(base, industry_ret), evaluate(timed, industry_ret),
-                    OUTPUT_DIR / "cumulative.png")
-    plot_signal(asof.dropna(subset=["vvix_ma"]), OUTPUT_DIR / "signal_timeline.png")
+    # One consolidated performance table for the whole experiment (all factors x
+    # both books), in the same house style as every other experiment's alpha table.
+    perf = pd.DataFrame(perf_rows)
+    C.R.render_alpha_table(perf, out_dir / "vol_timing_performance.png", title=_PERF_TITLE)
 
-    print(f"\nSaved timing outputs -> {OUTPUT_DIR}")
-    return comparison
+    print(f"\nSaved consolidated performance table -> "
+          f"{out_dir / 'vol_timing_performance.png'}")
+    return perf
+
+
+def main() -> None:
+    run()
 
 
 if __name__ == "__main__":
-    run()
+    main()

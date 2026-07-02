@@ -101,6 +101,7 @@ class Universe:
     industry_group: str | None = None            # match gics_industry_group_name
     industries: tuple[str, ...] | None = None    # match gics_industry_name
     min_mcap_usd: float | None = None            # point-in-time min market cap (USD)
+    min_mcap_pct: float | None = None            # per-month fraction of smallest-cap active names to drop
 
     @property
     def panel_path(self) -> Path:
@@ -114,7 +115,11 @@ SOFTWARE_SERVICES = Universe(
     price_file="price_software_services.feather",
     output_dir=OUTPUT_DIR / "software",
     industry_group=INDUSTRY_GROUP,
-    min_mcap_usd=0.1e9,   # point-in-time screen: hold only names >= $0.1B at formation
+    # Flat point-in-time size floor -- TEMPORARILY DISABLED (threshold set to 0, so it
+    # only drops names with no established USD cap).  Replaced for now by the relative
+    # per-month screen below; restore to 0.1e9 to re-enable the $0.1B floor.
+    min_mcap_usd=0.0,
+    min_mcap_pct=0.20,    # relative screen: drop the lowest 20% of active names by USD cap each month
 )
 
 # New universe: Banks + Insurance (gics_industry_name), writing to a dedicated
@@ -476,9 +481,19 @@ def add_next_return(panel: pd.DataFrame) -> pd.DataFrame:
 
 def apply_mcap_screen(panel: pd.DataFrame, u: Universe = SOFTWARE_SERVICES) -> pd.DataFrame:
     """
-    Point-in-time market-cap screen: keep each (stock_id, month) row only if its
-    formation-date USD market cap (``security_mcap_usd``, the month-end cap that is
-    known when the portfolio is formed) is at least ``u.min_mcap_usd``.
+    Point-in-time market-cap screen on the formation-date USD market cap
+    (``security_mcap_usd``, the month-end cap known when the portfolio is formed).
+    Two independent, composable pipelines -- a row survives only if it passes every
+    screen that is switched on:
+      * **flat floor** (``u.min_mcap_usd``): keep names with cap >= a fixed dollar
+        threshold.  Currently disabled on the default universe by setting it to 0
+        (which then only drops names with no established USD cap).
+      * **relative floor** (``u.min_mcap_pct``): each month, drop the lowest
+        ``min_mcap_pct`` of *active* (established-cap) names -- i.e. keep names at or
+        above the within-month ``min_mcap_pct`` quantile of USD cap.  This tracks the
+        universe as it grows/shrinks instead of a fixed dollar line.
+    A screen set to ``None`` is skipped; with both ``None`` the panel is returned
+    unchanged.
 
     Run *after* the time-series factors (momentum, beta, ...) and ``next_return``
     are built on the full contiguous history, but *before* :func:`add_zscores`, so:
@@ -486,15 +501,21 @@ def apply_mcap_screen(panel: pd.DataFrame, u: Universe = SOFTWARE_SERVICES) -> p
         (no splicing of non-adjacent months -- a name can leave and re-enter the
         universe across months), and
       * cross-sectional z-scores / quintile breakpoints are formed *within* the
-        investable (>= threshold) universe.
+        investable universe.
     A name eligible at formation is held through ``next_return`` regardless of its
     cap in the held month -- the standard screen-then-hold convention.  Rows with a
-    missing USD cap fail the ``>=`` test and drop out (cap not established).  With
-    ``min_mcap_usd is None`` the panel is returned unchanged.
+    missing USD cap fail every ``>=`` test and drop out (cap not established).
     """
-    if u.min_mcap_usd is None:
+    if u.min_mcap_usd is None and u.min_mcap_pct is None:
         return panel
-    keep = panel["security_mcap_usd"] >= u.min_mcap_usd
+    cap = panel["security_mcap_usd"]
+    keep = pd.Series(True, index=panel.index)
+    if u.min_mcap_usd is not None:
+        keep &= cap >= u.min_mcap_usd
+    if u.min_mcap_pct is not None:
+        floor = cap.groupby(panel["period"], observed=True).transform(
+            lambda s: s.quantile(u.min_mcap_pct))
+        keep &= cap >= floor
     return panel.loc[keep].reset_index(drop=True)
 
 

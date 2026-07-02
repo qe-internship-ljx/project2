@@ -103,6 +103,14 @@ def _load_engine():
 
 _engine = _load_engine()
 
+
+# Experiment 2's anchor library ``sw_factors.py`` sits one directory up, which is not
+# on the import path when this subexperiment runs from its own folder -- add it so we
+# can read the shared universe + market-cap-screen config directly instead of
+# redefining it.
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from sw_factors import software_universe
+
 # Re-export the generic helpers the analysis modules (and our own build) reuse,
 # so this module satisfies the exact interface ``quintile.py`` / ``regression.py``
 # / ``cost.py`` expect from their ``import factors as F``.
@@ -164,15 +172,10 @@ USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
-# Universe -- same cross-section as Experiment 2, separate output subtree
+# Universe -- same cross-section + market-cap screen as the rest of Experiment 2
+# (read from sw_factors.py), separate output subtree.
 # --------------------------------------------------------------------------- #
-SOFTWARE_SERVICES = Universe(
-    slug="software_services",
-    price_file="price_software_services.feather",
-    output_dir=OUTPUT_DIR,
-    industry_group=INDUSTRY_GROUP,
-    min_mcap_usd=0.1e9,   # point-in-time screen: hold only names >= $0.1B at formation
-)
+SOFTWARE_SERVICES = software_universe(OUTPUT_DIR)
 
 UNIVERSES: dict[str, Universe] = {SOFTWARE_SERVICES.slug: SOFTWARE_SERVICES}
 

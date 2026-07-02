@@ -324,10 +324,13 @@ def run_univariate(top: pd.DataFrame, spreads: pd.DataFrame,
     full, decade = (w[1] for w in windows)
     start, end = rotated.index.min(), rotated.index.max()
 
-    # Average monthly turnover cost of the rotation (reported, not netted).
+    # Average monthly turnover cost of the rotation (reported, not netted) plus the
+    # cost-incorporated Sharpe (raw + β-neutral) from the same cost series.
     cost_series = rotation_cost(factor_names, chosen)
     full["avg_cost"] = C.window_cost(cost_series)
     decade["avg_cost"] = C.window_cost(cost_series, start=DECADE_START)
+    C.attach_net_cost_sharpe(full, rotated, cost_series, industry)
+    C.attach_net_cost_sharpe(decade, rotated, cost_series, industry, start=DECADE_START)
 
     # --- Persist outputs --------------------------------------------------- #
     panel = spreads.loc[rotated.index].copy()
@@ -419,9 +422,12 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
 
     # Average monthly turnover cost of the rotating book (reported, not netted); the
     # pair switching is genuine turnover the double-sort cost routine already charges.
+    # Same series also nets the spread for the cost-incorporated Sharpe.
     cost_series = BT.bivariate_cost(frame)
     full["avg_cost"] = C.window_cost(cost_series)
     decade["avg_cost"] = C.window_cost(cost_series, start=DECADE_START)
+    C.attach_net_cost_sharpe(full, spread, cost_series, industry)
+    C.attach_net_cost_sharpe(decade, spread, cost_series, industry, start=DECADE_START)
 
     # --- Persist outputs --------------------------------------------------- #
     held = pairs.loc[book.index]                     # pair traded each booked month

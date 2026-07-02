@@ -146,19 +146,40 @@ USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
-# Universe
+# Universe -- SINGLE SOURCE OF TRUTH for Experiment 2
 # --------------------------------------------------------------------------- #
-# Same cross-section as Experiment 1's default (Software & Services by GICS
-# industry *group*), but writing to *this* experiment's output tree so the two
-# experiments never collide.  Outputs mirror the Experiment 1 layout one-for-one:
-#   Standard/{factor_panel.csv, quintile/..., regression/...}
-SOFTWARE_SERVICES = Universe(
-    slug="software_services",
-    price_file="price_software_services.feather",
-    output_dir=OUTPUT_DIR,
-    industry_group=INDUSTRY_GROUP,
-    min_mcap_usd=0.1e9,   # point-in-time screen: hold only names >= $0.1B at formation
-)
+# Every Experiment 2 software factor library (this module plus the RD/, Skew/,
+# Rev & Cost/ and Stability/ subexperiments) trades the *same* Software & Services
+# cross-section and applies the *same* market-cap screen -- they differ only in
+# where they write.  So the cross-section definition and the screen live here once
+# and the subexperiments build their universe from ``software_universe`` (loading
+# this module by path) instead of redefining it.
+
+# Market-cap screen configuration (see ``factors.apply_mcap_screen``):
+#   * flat point-in-time size floor -- TEMPORARILY DISABLED (0 only drops names
+#     with no established USD cap); restore to 0.1e9 to re-enable the $0.1B floor.
+#   * relative per-month floor -- drop the lowest 20% of active names by USD cap.
+MIN_MCAP_USD: float = 0.0
+MIN_MCAP_PCT: float = 0.20
+
+
+def software_universe(output_dir: Path) -> Universe:
+    """The shared Experiment 2 Software & Services universe, parameterised only by
+    where it writes.  Bundles the cross-section (GICS industry *group*) and the
+    market-cap screen so both are defined in exactly one place."""
+    return Universe(
+        slug="software_services",
+        price_file="price_software_services.feather",
+        output_dir=output_dir,
+        industry_group=INDUSTRY_GROUP,
+        min_mcap_usd=MIN_MCAP_USD,
+        min_mcap_pct=MIN_MCAP_PCT,
+    )
+
+
+# This module writes to Standard/; outputs mirror the Experiment 1 layout
+# one-for-one: Standard/{factor_panel.csv, quintile/..., regression/...}.
+SOFTWARE_SERVICES = software_universe(OUTPUT_DIR)
 
 UNIVERSES: dict[str, Universe] = {SOFTWARE_SERVICES.slug: SOFTWARE_SERVICES}
 

@@ -139,7 +139,6 @@ _SUBEXPERIMENTS = [
     _THIS_DIR / "RD" / "main_rd.py",
     _THIS_DIR / "Rev & Cost" / "main_revcost.py",
     _THIS_DIR / "Stability" / "main_stability.py",
-    _THIS_DIR / "Cross_val" / "main_crossval.py",
     _THIS_DIR / "Skew" / "main_skew.py",
 ]
 

@@ -2,52 +2,62 @@
 crossval_factors.py
 ===================
 
-**Cross-validation** of two stability signals -- ``rd_stability`` (from the
-``RD/`` extension) and ``revenue_stability`` (from the ``Rev & Cost/``
-extension) -- on a *different* universe: the **Banks + Insurance** cross-section
-(``gics_industry_name in {'Banks', 'Insurance'}``).
+**Cross-validation** of Experiment 2's **top factors** on the **Banks + Insurance +
+Commodity Producers** universe -- the union of Experiment 1's two non-software
+cross-sections (financials + resources), a structurally unrelated test bed that is
+broad enough to probe generalisation without the cost of the whole market.  The
+same market-cap screen the software libraries apply is used.
 
-Both factors were discovered and validated on GICS *Software & Services*, where
-each earned a strongly positive industry-neutral alpha (see ``MEMORY``: rd_stability
-alpha t ~+3.9 full, revenue_stability ~+4.4 full).  This module asks the
-out-of-sample-universe question: **do the same two stability constructs survive
-in a structurally unrelated industry** (financials), or were they software-specific?
+The candidate set is no longer a hand-picked pair -- it is the **top ``TOP_N``
+factors** of the cross-experiment top-factor hand-off
+(``top_factors/top_factors.csv``), read the *same way* Experiment 3's
+``factor_momentum.py`` / ``composite.py`` read it (the file is pre-sorted by
+industry-neutral alpha t-stat, so the first ``TOP_N`` rows are the leaders).  Each
+was discovered and validated on GICS *Software & Services*; this module asks the
+out-of-sample-universe question: **do the software-industry leaders survive in
+structurally unrelated industries** (financials + resources), or were they
+software-specific?
 
-This is a *sixth-style* factor library for Experiment 2 (alongside
-``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/``,
-``revcost_factors.py`` -> ``Rev & Cost/``, ``stability_factors.py`` ->
-``Stability/``).  Like the others it is a **drop-in for Experiment 1's analysis
-engine**: the quintile sorts, cross-sectional (Fama-MacBeth) regressions,
-long/short books, trading-cost model and every plot are reused **verbatim** from
-``experiment1 - general factors/{quintile,regression,cost}.py`` via the shared
-engine in ``experiment1 - general factors/factors.py``.  The *only* things that
-change here relative to ``Stability/`` are (a) the two factor definitions, copied
-**verbatim** from their source libraries so the cross-validation tests the exact
-same construct, and (b) the **universe**: this library runs on
-``BANKS_INSURANCE`` (the same universe Experiment 1 defines), writing to the
-``Cross_val/`` folder.
+Reuse -- test the *exact* construct that earned the ranking
+-----------------------------------------------------------
+The factors in the hand-off live in several source libraries (Experiment 1's
+general factors plus Experiment 2's software subexperiments), each of which is a
+**universe-parameterised** drop-in for Experiment 1's engine.  Rather than
+re-implement (or copy) each definition here, this module **reuses the source
+library verbatim**: for every requested factor it looks up its source
+subexperiment (the ``subexperiment`` column of ``top_factors.csv``), runs that
+library's own :func:`build` on the **Banks + Insurance** universe, and keeps just
+that factor's rows.  So the construct cross-validated here is byte-for-byte the
+one that produced the software-industry ranking -- if a source definition changes,
+this test tracks it with no edit.
 
-Factor definitions (identical to their source libraries)
---------------------------------------------------------
-    name               definition                                                source
-    -----------------  --------------------------------------------------------  ------------------
-    rd_stability       - trailing 36m coeff. of variation of (rd_ltm / sales)    RD/rd_factors.py
-    revenue_stability  - trailing 36m std of YoY revenue growth                  Rev & Cost/revcost_factors.py
+Like every factor library in the project it is also a **drop-in for Experiment
+1's analysis engine**: the quintile sorts, cross-sectional (Fama-MacBeth)
+regressions, long/short books, trading-cost model and every plot are reused
+**verbatim** from ``experiment1 - general factors/{quintile,regression,cost}.py``
+via the shared engine in ``experiment1 - general factors/factors.py``.  The only
+things that change relative to the software subexperiments are (a) the factor set
+(the top-``TOP_N`` hand-off, resolved to their source libraries) and (b) the
+**universe**: this library runs on the ``BANKS_COMMODITY`` universe (Banks +
+Insurance + Commodity Producers), writing to the ``Cross_val/`` folder.
 
-Both are negative trailing-36m second moments (high = steady = the bullish long
-leg), currency-neutral (ratios / growth rates of same-currency line items), and
-both carry ``higher_is_bullish = True`` with ``USE_CANONICAL_LS_DIRECTION`` so the
-realised long/short book is signed by the software-discovered prior -- a negative
-alpha t-stat here therefore means the signal failed to *generalise* to financials.
+Direction / sign
+----------------
+Every factor is signed by its software-discovered bullish prior
+(``higher_is_bullish``, read from the source library) with
+``USE_CANONICAL_LS_DIRECTION`` -- so the realised long/short book on this universe
+can be read directly against the hypothesised direction, and a negative alpha
+t-stat means the signal failed to *generalise* to financials + resources.
 
 Coverage caveat
 ---------------
-``rd_stability`` depends on a meaningful, sustained R&D programme (its CoV is
-undefined when trailing mean R&D/sales < ``MIN_MEAN_INTENSITY``).  Banks and
-insurers overwhelmingly report *no* R&D line, so ``rd_stability`` is expected to
-have very thin coverage on this universe; ``revenue_stability`` (which needs only
-a sales history) should cover the bulk of the cross-section.  The realised
-coverage is printed by ``main_crossval.py`` and is itself part of the finding.
+The top factors span several data footprints; some depend on line items banks,
+insurers and resource firms rarely report.  ``rd_stability`` in particular needs a
+meaningful R&D programme (its coefficient of variation is undefined when trailing
+mean R&D/sales is tiny), which these industries largely lack, so it is expected to
+have thin coverage; revenue/quality signals built only on a sales/earnings history
+should cover more of the cross-section.  The realised coverage per factor is
+printed by ``main_crossval.py`` and is itself part of the finding.
 
 Run standalone to (re)build the panel::
 
@@ -60,35 +70,38 @@ To run the full pipeline (panel + quintile sorts + regressions + redundancy)::
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 # --------------------------------------------------------------------------- #
 # Shared engine (Experiment 1) -- loaded by path under a private module name
 # (its folder name contains spaces, and we must not shadow the name ``factors``,
 # which the analysis modules bind to and the driver points at *this* library).
+# This engine is *also* the source library for any "General" (Experiment 1)
+# top factor, so ``_source_library("General")`` returns it directly.
 # --------------------------------------------------------------------------- #
 _EXP1_DIR = Path(__file__).resolve().parent.parent.parent / "experiment1 - general factors"
+_EXP2_DIR = Path(__file__).resolve().parent.parent
 
 
-def _load_engine():
-    spec = importlib.util.spec_from_file_location(
-        "crossval_factor_engine", _EXP1_DIR / "factors.py")
+def _load_module(name: str, path: Path):
+    """Import a module by file path under ``name`` and register it in sys.modules."""
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-_engine = _load_engine()
+_engine = _load_module("crossval_factor_engine", _EXP1_DIR / "factors.py")
 
-# Re-export the generic helpers the analysis modules (and our own build) reuse,
-# so this module satisfies the exact interface ``quintile.py`` / ``regression.py``
-# / ``cost.py`` expect from their ``import factors as F``.
+# Re-export the generic helpers the analysis modules (quintile.py / regression.py
+# / cost.py) reuse, so this module satisfies the exact interface they expect from
+# their ``import factors as F``.
 Universe = _engine.Universe
 DATA_DIR = _engine.DATA_DIR
 WINSOR_PCT = _engine.WINSOR_PCT
@@ -115,25 +128,12 @@ ols = _engine.ols
 # software-universe libraries.
 OUTPUT_DIR = Path(__file__).resolve().parent
 
-# Estimation windows / parameters -- copied verbatim from the two source
-# libraries so the cross-validation tests the exact same constructs.
-YOY_LAG = 12                # year-over-year lag (months) for revenue growth (revenue_stability)
-STAB_WINDOW = 36            # trailing months for both coefficient-of-variation moments
-STAB_MIN_PERIODS = 24       # require >=2y of history before a stability score exists
-MIN_MEAN_INTENSITY = 0.005  # floor on trailing mean R&D/sales below which the
-                            # R&D-intensity CoV is undefined (R&D ~ 0) -- RD/rd_factors.py
-
-# Ordered list of the factors produced by this module.  ``higher_is_bullish`` is
-# the academically expected sign of the long leg (top quintile): True => the
-# canonical trade is long Q5 / short Q1.  With ``USE_CANONICAL_LS_DIRECTION``
-# below set True the long/short book is signed by this prior (NOT by the
-# in-sample t-stat), so a negative realised alpha t-stat means the factor failed
-# to generalise to this universe -- exactly what we want for cross-validation.
-FACTORS: dict[str, dict] = {
-    "rd_stability":      {"family": "R&D stability (commitment consistency) [from RD/]",        "higher_is_bullish": True},
-    "revenue_stability": {"family": "Revenue stability (recurring-revenue durability) [from Rev & Cost/]", "higher_is_bullish": True},
-}
-FACTOR_NAMES = list(FACTORS)
+# The cross-experiment top-factor hand-off (written by
+# ``experiment2 - sw factors/main.py``, ranking Experiment 1's general factors
+# together with every Experiment 2 software subexperiment by industry-neutral
+# alpha t-stat).  We test its leaders -- read exactly as Experiment 3 reads it.
+TOP_FACTORS_CSV = _EXP2_DIR / "top_factors" / "top_factors.csv"
+TOP_N = 5
 
 # Sign the directional long/short book by each factor's canonical (software-
 # discovered) prior rather than the in-sample Fama-MacBeth t-stat, so the realised
@@ -142,219 +142,194 @@ USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
-# Universe -- Banks + Insurance (gics_industry_name), the cross-validation target.
-# Mirrors Experiment 1's BANKS_INSURANCE universe exactly (same price feather,
-# same industry list) but writes to this Cross_val/ folder.
+# Top-factor hand-off -> the factor set (read the same way Experiment 3 does)
 # --------------------------------------------------------------------------- #
-BANKS_INSURANCE = Universe(
-    slug="banks_insurance",
-    price_file="price_banks_insurance.feather",
+def load_top_factors(csv_path: Path = TOP_FACTORS_CSV, n: int = TOP_N) -> pd.DataFrame:
+    """The top-``n`` rows of the cross-experiment top-factor hand-off
+    (``top_factors.csv``), pre-sorted by industry-neutral alpha t-stat -- one row
+    per factor carrying its ``factor`` name, source ``subexperiment``, bullish
+    ``direction`` and ``family``.
+
+    Read afresh each call, so the cross-validation always tracks whatever factors
+    rank highest after the latest Experiment 1/2 run.  Raises a clear error if the
+    hand-off is missing (identical contract to ``composite.top_factors`` /
+    ``factor_momentum.load_top_factors``)."""
+    if not Path(csv_path).exists():
+        raise FileNotFoundError(
+            f"{csv_path} not found.  Run Experiment 2 first -- `python main.py` "
+            "(or `python main.py collect`) in 'experiment2 - sw factors' writes "
+            "the top-factor hand-off.")
+    return pd.read_csv(csv_path).head(n).reset_index(drop=True)
+
+
+# The active top-factor table and the module-level constants the analysis engine
+# expects (``FACTOR_NAMES`` / ``FACTORS[name]{family, higher_is_bullish}``), built
+# from the hand-off.  ``direction == 'Q5-Q1'`` => the bullish leg is the top
+# z-score quintile, i.e. higher_is_bullish.
+TOP_FACTORS = load_top_factors()
+FACTOR_NAMES = TOP_FACTORS["factor"].tolist()
+FACTORS: dict[str, dict] = {
+    r.factor: {"family": r.family,
+               "higher_is_bullish": str(r.direction).strip() == "Q5-Q1"}
+    for r in TOP_FACTORS.itertuples()
+}
+
+
+# --------------------------------------------------------------------------- #
+# Universe -- Banks + Insurance + Commodity Producers, the cross-validation target.
+# A structurally unrelated union of Experiment 1's two non-software universes
+# (financials + resources), broad enough to test generalisation without the cost
+# of the whole market.  Its two constituents already have small, pre-filtered daily
+# price feathers; we concatenate those once into a combined feather (see
+# :func:`_ensure_combined_price_file`) so each source library's ``build`` reads only
+# the cheap per-universe data and never touches the 150M-row whole-market feed.
+# It applies the **same market-cap screen as the Experiment 2 software libraries**
+# (``sw_factors.py``): no flat USD floor (0.0 only drops names with no established
+# cap) plus a relative per-month floor that drops the lowest 20% of active names by
+# USD cap.  The screen is enforced by each source library's own ``build``
+# (``apply_mcap_screen(panel, u)``), so setting the thresholds here is all that is
+# required.
+# --------------------------------------------------------------------------- #
+_CONSTITUENT_PRICE_FILES = ("price_banks_insurance.feather",
+                            "price_commodity_producers.feather")
+_COMBINED_PRICE_FILE = "price_banks_insurance_commodity.feather"
+_INDUSTRIES = ("Banks", "Insurance", "Metals & Mining", "Oil, Gas & Consumable Fuels")
+
+
+def _ensure_combined_price_file() -> str:
+    """Concatenate the Banks+Insurance and Commodity-Producers daily price feathers
+    into one combined feather in ``data/`` (built once, cached on disk) and return
+    its filename.  Cheap -- both inputs are the small, pre-filtered per-universe
+    feathers (~21.5M rows combined), so this never reads the whole-market
+    ``price.feather``.  The two industries are disjoint, so no de-duplication is
+    needed."""
+    out = DATA_DIR / _COMBINED_PRICE_FILE
+    if not out.exists():
+        frames = [pd.read_feather(DATA_DIR / f) for f in _CONSTITUENT_PRICE_FILES]
+        pd.concat(frames, ignore_index=True).to_feather(out)
+    return _COMBINED_PRICE_FILE
+
+
+BANKS_COMMODITY = Universe(
+    slug="banks_insurance_commodity",
+    price_file=_ensure_combined_price_file(),
     output_dir=OUTPUT_DIR,
-    industries=("Banks", "Insurance"),
+    industries=_INDUSTRIES,
+    min_mcap_usd=0.0,
+    min_mcap_pct=0.20,
 )
 
 # Experiment 1's analysis modules (quintile.py / regression.py / cost.py) bind the
 # symbol ``F.SOFTWARE_SERVICES`` as their default-universe argument, evaluated at
-# import time.  We always pass ``u=BANKS_INSURANCE`` explicitly, so this alias is
+# import time.  We always pass ``u=BANKS_COMMODITY`` explicitly, so this alias is
 # only here to satisfy that default-argument binding -- it points at this library's
-# real (banks_insurance) universe so even an un-passed default would be correct.
-SOFTWARE_SERVICES = BANKS_INSURANCE
+# real (banks+insurance+commodity) universe so even an un-passed default is correct.
+SOFTWARE_SERVICES = BANKS_COMMODITY
 
-UNIVERSES: dict[str, Universe] = {BANKS_INSURANCE.slug: BANKS_INSURANCE}
+UNIVERSES: dict[str, Universe] = {BANKS_COMMODITY.slug: BANKS_COMMODITY}
 
 
-def universe_from_argv(default: Universe = BANKS_INSURANCE) -> Universe:
+def universe_from_argv(default: Universe = BANKS_COMMODITY) -> Universe:
     """Pick a universe from argv[1] (its slug); fall back to ``default``."""
     if len(sys.argv) > 1:
         return UNIVERSES[sys.argv[1]]
     return default
 
 
-# --------------------------------------------------------------------------- #
-# Data loading
-# --------------------------------------------------------------------------- #
-def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
-    """
-    Point-in-time monthly fundamentals carrying everything the two stability
-    factors need: R&D expense and sales (``rd_stability`` = CoV of R&D/sales) and
-    sales again (``revenue_stability`` = std of YoY sales growth).  Both live in
-    the *base* ``fundamental_master`` table (no extended-table merge required).
+# Redundancy benchmark: Experiment 1's *full* general market factor set, built on
+# this SAME (banks+insurance+commodity, cap-screened) universe -- the only valid
+# same-universe comparison for the factor_correlation step.  It writes to a
+# dedicated subfolder so it never collides with this library's own factor_panel.csv.
+GENERAL_MARKET = dataclasses.replace(
+    BANKS_COMMODITY, slug="cross_universe_general", output_dir=OUTPUT_DIR / "general_market")
 
-    Each record carries ``observation_date`` (when the report became
-    observable); we align on it in :func:`build_monthly_panel` via the shared
-    :func:`attach_pit_fundamentals` to avoid look-ahead -- identical convention
-    to Experiment 1 / the other Experiment 2 libraries.
-    """
-    cols = ["date_fundamental", "observation_date", "stock_id",
-            "rd_ltm", "sales_ltm"]
-    fm = pd.read_feather(DATA_DIR / "fundamental_master.feather", columns=cols)
-    fm["stock_id"] = fm["stock_id"].astype(str)
-    fm = fm[fm["stock_id"].isin(universe)].copy()
-    fm["date_fundamental"] = pd.to_datetime(fm["date_fundamental"])
-    fm["observation_date"] = pd.to_datetime(fm["observation_date"])
-    return fm
+
+def build_general_market_panel(rebuild: bool = False) -> Path:
+    """Build (or reuse) Experiment 1's full general market factor panel on the SAME
+    (banks+insurance+commodity, cap-screened) universe -- the redundancy benchmark
+    for the factor_correlation step -- by reusing Experiment 1's engine verbatim.
+    Returns the panel path."""
+    if rebuild or not GENERAL_MARKET.panel_path.exists():
+        _engine.build(save=True, u=GENERAL_MARKET)
+    return GENERAL_MARKET.panel_path
 
 
 # --------------------------------------------------------------------------- #
-# Monthly panel construction (mirrors the engine / the other libraries exactly)
+# Source libraries -- resolve each top factor to the library that computes it
 # --------------------------------------------------------------------------- #
-def build_monthly_panel(universe: pd.Index | None = None,
-                        u: Universe = BANKS_INSURANCE) -> pd.DataFrame:
-    """
-    Assemble a (stock_id, period) monthly panel: monthly total return, month-end
-    market cap (local and USD), the market-cap-weighted universe ("market")
-    return, and the point-in-time fundamentals.  The price->monthly aggregation
-    mirrors Experiment 1 so the experiments share an identical return definition
-    and month-end alignment.
-    """
-    if universe is None:
-        universe = load_universe(u)
-
-    px = load_prices(universe, u)
-    px["period"] = px["date"].dt.to_period("M")
-    px["gross"] = 1.0 + px["total_return"].fillna(0.0)
-
-    monthly = (px.groupby(["stock_id", "period"], observed=True)
-                 .agg(mret=("gross", "prod"),
-                      security_mcap_local=("security_mcap_local", "last"),
-                      price_local=("price_local", "last"),
-                      n_days=("date", "size"))
-                 .reset_index())
-    monthly["mret"] = monthly["mret"] - 1.0
-
-    # USD market cap (the cross-sectional weight) and the market-cap-weighted
-    # universe return = within-industry "market" proxy (prior month-end weights).
-    monthly = attach_usd_market_cap(monthly)
-    monthly["mkt_ret"] = monthly["period"].map(cap_weighted_market_return(monthly))
-
-    fund = load_fundamentals(universe)
-    monthly = attach_pit_fundamentals(monthly, fund)
-
-    monthly = monthly.sort_values(["stock_id", "period"]).reset_index(drop=True)
-    return monthly
-
-
-# --------------------------------------------------------------------------- #
-# Building blocks (copied verbatim from the source libraries)
-# --------------------------------------------------------------------------- #
-def _rd_clip(p: pd.DataFrame) -> pd.Series:
-    """R&D expense floored at 0 (a handful of reported R&D values are negative --
-    data artefacts of restatements; genuine R&D cannot be negative).
-    Verbatim from RD/rd_factors.py."""
-    return p["rd_ltm"].astype(float).clip(lower=0.0)
-
-
-def _rd_intensity_series(p: pd.DataFrame) -> pd.Series:
-    """R&D / sales, the operating R&D-intensity ratio (sales must be positive).
-    Verbatim from RD/rd_factors.py."""
-    sales = p["sales_ltm"].astype(float)
-    intensity = _rd_clip(p) / sales.where(sales > 0.0)
-    return intensity
-
-
-def _yoy_growth(p: pd.DataFrame, s: pd.Series) -> pd.Series:
-    """Year-over-year growth (level_t / level_{t-12m} - 1) of a series, per stock.
-
-    The prior-year level is guarded to be strictly positive (``.where(prev > 0)``)
-    so the growth rate is well-defined and not dominated by sign flips / tiny
-    denominators; otherwise the observation is left missing.
-    Verbatim from Rev & Cost/revcost_factors.py."""
-    prev = s.groupby(p["stock_id"], observed=True).shift(YOY_LAG)
-    return s / prev.where(prev > 0.0) - 1.0
-
-
-# --------------------------------------------------------------------------- #
-# Factor definitions (copied verbatim from the source libraries)
-# --------------------------------------------------------------------------- #
-def _f_rd_stability(p: pd.DataFrame) -> pd.Series:
-    """
-    R&D commitment stability: the NEGATIVE trailing-36m coefficient of variation
-    (std / mean) of R&D intensity, per stock.  High (near 0) => a steady,
-    committed R&D programme; low (very negative) => erratic spending, e.g. R&D
-    cut to manage earnings (Graham, Harvey & Rajgopal 2005).  A second moment, so
-    orthogonal by construction to every level signal in the project.  Undefined
-    when the trailing mean intensity is below ``MIN_MEAN_INTENSITY`` (R&D ~ 0).
-    Verbatim from RD/rd_factors.py.
-    """
-    intensity = _rd_intensity_series(p)
-    g = intensity.groupby(p["stock_id"], observed=True)
-    mean = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).mean())
-    std = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std())
-    cov = std / mean.where(mean > MIN_MEAN_INTENSITY)
-    return -cov
-
-
-def _f_revenue_stability(p: pd.DataFrame) -> pd.Series:
-    """
-    Recurring-revenue durability: the NEGATIVE trailing-36m standard deviation of
-    YoY revenue growth, per stock.  High (near 0) => a smooth, predictable,
-    recurring (subscription-like) top line; low (very negative) => lumpy
-    license/deal revenue with renewal/air-pocket risk.  A second moment, so
-    orthogonal by construction to every level signal in the project.  We negate so
-    that higher = more stable = the bullish (long) leg.
-    Verbatim from Rev & Cost/revcost_factors.py.
-    """
-    g = _yoy_growth(p, p["sales_ltm"].astype(float))
-    g = g.replace([np.inf, -np.inf], np.nan)
-    std = (g.groupby(p["stock_id"], observed=True)
-            .transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std()))
-    return -std
-
-
-_FACTOR_FUNCS = {
-    "rd_stability": _f_rd_stability,
-    "revenue_stability": _f_revenue_stability,
+# Every factor in the hand-off is produced by exactly one source library.  We map
+# the ``subexperiment`` label recorded in ``top_factors.csv`` to that library's
+# module file; "General" is Experiment 1's engine (already loaded above).  Each
+# library is a universe-parameterised drop-in whose ``build(save, u)`` computes
+# all its factors on universe ``u`` and returns the tidy (date, stock_id, factor,
+# value, zscore, next_return, weight) panel -- so we reuse the exact construct.
+_SOURCE_LIB_PATHS: dict[str, Path] = {
+    "Standard":   _EXP2_DIR / "sw_factors.py",
+    "RD":         _EXP2_DIR / "RD" / "rd_factors.py",
+    "Rev & Cost": _EXP2_DIR / "Rev & Cost" / "revcost_factors.py",
+    "Stability":  _EXP2_DIR / "Stability" / "stability_factors.py",
+    "Skew":       _EXP2_DIR / "Skew" / "skew_factors.py",
 }
+_LIB_CACHE: dict[str, object] = {}
 
 
-def compute_factors(panel: pd.DataFrame) -> pd.DataFrame:
-    """Add a raw value column for every factor in :data:`FACTOR_NAMES`."""
-    for name in FACTOR_NAMES:
-        panel[name] = _FACTOR_FUNCS[name](panel).replace([np.inf, -np.inf], np.nan)
-    return panel
+def _source_library(subexperiment: str):
+    """The factor library that computes a given subexperiment's factors, loaded by
+    path and cached.  "General" resolves to Experiment 1's engine; every other
+    label resolves through :data:`_SOURCE_LIB_PATHS`.  Raises a clear error if the
+    subexperiment is unknown (e.g. a hand-off from a subexperiment not yet wired
+    here)."""
+    if subexperiment == "General":
+        return _engine
+    if subexperiment in _LIB_CACHE:
+        return _LIB_CACHE[subexperiment]
+    if subexperiment not in _SOURCE_LIB_PATHS:
+        known = ", ".join(["General", *_SOURCE_LIB_PATHS])
+        raise KeyError(
+            f"top factor from subexperiment {subexperiment!r} has no source "
+            f"library wired in crossval_factors (known: {known}).")
+    path = _SOURCE_LIB_PATHS[subexperiment]
+    module = _load_module(f"crossval_src_{path.stem}", path)
+    _LIB_CACHE[subexperiment] = module
+    return module
 
 
 # --------------------------------------------------------------------------- #
-# Cross-sectional standardisation & tidy output (mirror the engine's versions)
+# Build -- reuse each source library on the Banks + Insurance universe
 # --------------------------------------------------------------------------- #
-def add_zscores(panel: pd.DataFrame) -> pd.DataFrame:
-    for name in FACTOR_NAMES:
-        panel[f"{name}_z"] = cross_sectional_zscore(panel[name], panel["period"])
-    return panel
+def build(save: bool = True, u: Universe = BANKS_COMMODITY) -> pd.DataFrame:
+    """
+    Build the cross-validation factor panel: for every top factor, run its source
+    library's own ``build`` on the cross-validation universe ``u`` and keep just
+    that factor's rows, then stack into one tidy long panel (date, stock_id, factor,
+    value, zscore, next_return, weight) -- the exact schema Experiment 1 / 2 use.
 
-
-def to_long_panel(panel: pd.DataFrame) -> pd.DataFrame:
-    """Reshape to one row per (date, stock_id, factor): value, z-score, next
-    return, and the market-cap ``weight`` (month-end USD market cap).  Rows with a
-    missing factor value are dropped.  Identical schema to Experiment 1 / 2."""
-    panel = panel.copy()
-    panel["date"] = panel["period"].dt.to_timestamp(how="end").dt.normalize()
+    Each source library is built at most once (its ``build`` computes *all* its
+    factors on ``u``; we slice out only the requested ones), so the returned panel
+    carries only the top-factor rows.  ``next_return`` / ``weight`` are identical
+    across libraries for a given (date, stock_id) since all are built from the same
+    universe and prices.
+    """
     frames = []
-    for name in FACTOR_NAMES:
-        f = panel[["date", "stock_id", name, f"{name}_z",
-                   "next_return", "security_mcap_usd"]].copy()
-        f.columns = ["date", "stock_id", "value", "zscore", "next_return", "weight"]
-        f.insert(2, "factor", name)
-        frames.append(f.dropna(subset=["value"]))
-    out = pd.concat(frames, ignore_index=True)
-    return out.sort_values(["factor", "date", "stock_id"]).reset_index(drop=True)
+    # Group by source subexperiment so each library is built once; preserve the
+    # hand-off's (rank) order of appearance.
+    for subexp in TOP_FACTORS["subexperiment"].drop_duplicates():
+        wanted = TOP_FACTORS.loc[TOP_FACTORS["subexperiment"] == subexp, "factor"].tolist()
+        lib = _source_library(subexp)
+        long = lib.build(save=False, u=u)                 # all of this library's factors on banks_insurance
+        frames.append(long[long["factor"].isin(wanted)])
 
-
-def build(save: bool = True, u: Universe = BANKS_INSURANCE) -> pd.DataFrame:
-    """Full build: panel -> factors -> z-scores -> next return -> tidy long."""
-    panel = build_monthly_panel(u=u)
-    panel = compute_factors(panel)
-    panel = add_zscores(panel)
-    panel = add_next_return(panel)
-    long = to_long_panel(panel)
+    out = (pd.concat(frames, ignore_index=True)
+             .sort_values(["factor", "date", "stock_id"])
+             .reset_index(drop=True))
     if save:
         u.output_dir.mkdir(parents=True, exist_ok=True)
-        long.to_csv(u.panel_path, index=False)
-    return long
+        out.to_csv(u.panel_path, index=False)
+    return out
 
 
 def load_panel(rebuild: bool = False,
-               u: Universe = BANKS_INSURANCE) -> pd.DataFrame:
+               u: Universe = BANKS_COMMODITY) -> pd.DataFrame:
     """Load the tidy factor panel, building it first if needed (engine contract)."""
     if rebuild or not u.panel_path.exists():
         return build(save=True, u=u)
@@ -371,6 +346,8 @@ if __name__ == "__main__":
     print(f"Built cross-validation factor panel: {len(long):,} rows | "
           f"{n_stocks} stocks | {n_months} months "
           f"({long['date'].min():%Y-%m} .. {long['date'].max():%Y-%m})")
+    print(f"Top factors ({len(FACTOR_NAMES)}): " + ", ".join(
+        f"{r.factor} [{r.subexperiment}]" for r in TOP_FACTORS.itertuples()))
     print(f"Saved -> {u.panel_path}")
     counts = (long.groupby("factor")["value"].size().reindex(FACTOR_NAMES))
     print("\nObservations per factor:")

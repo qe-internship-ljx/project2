@@ -50,14 +50,14 @@ Run standalone::
 
     python spread_timing.py
 
-Outputs land under ``experiment4 - timing/output/spread_timing/``:
+The single output is one consolidated performance table under
+``experiment4 - timing/output/spread_timing/``:
 
-    spread_timing_summary.csv     per factor: always-on vs timed after-cost alpha
-                                  (+t) full & 2016+, average cost, % months in market
-    spread_timing_comparison.png  bar chart of always-on vs timed after-cost alpha t
-    <factor>/timing_comparison.csv   always-on vs timed, gross & net, full & 2016+
-    <factor>/cumulative.png          after-cost growth of $1, always-on vs timed
-    <factor>/signal_timeline.png     the factor-value spread vs its 6m trailing average
+    spread_timing_performance.png  ONE consolidated performance table (project house
+                                   style, one row per factor x book): gross (cost-free)
+                                   L/S & beta-neutral Sharpe, the combined after-cost
+                                   ("Sharpe net cost") Sharpe, industry-neutral alpha
+                                   & beta, average cost -- full sample and 2016+
 """
 
 from __future__ import annotations
@@ -65,10 +65,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 # --------------------------------------------------------------------------- #
@@ -92,7 +88,7 @@ TOP_FACTORS_CSV = C.TOP_FACTORS_CSV
 LOOKBACK = 6                                  # trailing months for the spread average
 N_QUINTILES = C.N_QUINTILES
 DECADE_START = C.DECADE_START                 # 2016-01-01, the project "past decade" cut-off
-OUTPUT_DIR = _THIS_DIR / "output" / "spread_timing"
+OUTPUT_DIR = _THIS_DIR / "output"
 
 UNIVERSE = F.SOFTWARE_SERVICES                # every top factor lives on this cross-section
 
@@ -149,14 +145,18 @@ WINDOWS: list[tuple[str, pd.Timestamp | None]] = [("full", None), ("2016+", DECA
 
 def evaluate_factor(factor: str, subexperiment: str, direction: str,
                     panel: pd.DataFrame, cost_panel: pd.DataFrame,
-                    industry: pd.Series) -> tuple[pd.DataFrame, dict]:
+                    industry: pd.Series) -> pd.DataFrame:
     """
     Build the always-on and spread-timed books for one factor and tabulate their
     gross and after-cost performance over the full sample and 2016+.
 
-    Returns ``(comparison, series)``: ``comparison`` is the tidy stats table (one
-    row per book x window), ``series`` carries the monthly series needed for the
-    plots.
+    Returns the tidy ``comparison`` stats table (one row per book x window): the
+    gross (cost-free) mean / t / Sharpe / industry-neutral alpha & beta, and the
+    net-of-cost (after-cost) counterparts, plus the average turnover cost and the
+    fraction of months in market.  The market-alpha regression (gross and net) is
+    estimated over the in-market months only, so the timed book's alpha is not
+    diluted by the exact-zero cash months; mean / t / Sharpe still cover the full
+    timed series including those months.
     """
     gross = FM.signed_spread(subexperiment, factor, direction)        # bullish Q5-Q1 book
     spread = value_spread(panel, factor)
@@ -182,122 +182,71 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
     rows = []
     for book, (gross_s, cost_s, active_s) in books.items():
         net_s = gross_s - cost_s
+        # The market-alpha regression uses only the in-market months: an
+        # out-of-market month is cash (an exact 0 with no industry exposure), so
+        # including it would mechanically shrink both alpha and beta toward zero.
+        # For the always-on book the mask is all-True and rg/rn coincide with sg/sn.
+        reg_gross, reg_net = gross_s[active_s], net_s[active_s]
         for win_name, start in WINDOWS:
             sg = C.book_stats(gross_s, industry, start=start)
             sn = C.book_stats(net_s, industry, start=start)
+            rg = C.book_stats(reg_gross, industry, start=start)
+            rn = C.book_stats(reg_net, industry, start=start)
             rows.append({
                 "factor": factor, "book": book, "window": win_name,
                 "gross_mean": sg["mean_monthly"], "gross_tstat": sg["tstat"],
-                "gross_sharpe": sg["sharpe"], "gross_alpha": sg["alpha"],
-                "gross_alpha_tstat": sg["alpha_tstat"],
-                "ind_beta": sg["ind_beta"], "ind_beta_tstat": sg["ind_beta_tstat"],
+                "gross_sharpe": sg["sharpe"], "gross_alpha": rg["alpha"],
+                "gross_alpha_tstat": rg["alpha_tstat"],
+                "ind_beta": rg["ind_beta"], "ind_beta_tstat": rg["ind_beta_tstat"],
                 "sharpe_neutral": sg["sharpe_neutral"],
                 "avg_cost": float(_win(cost_s, start).mean()),
                 "net_mean": sn["mean_monthly"], "net_tstat": sn["tstat"],
-                "net_sharpe": sn["sharpe"], "net_alpha": sn["alpha"],
-                "net_alpha_tstat": sn["alpha_tstat"],
+                "net_sharpe": sn["sharpe"], "net_alpha": rn["alpha"],
+                "net_alpha_tstat": rn["alpha_tstat"],
                 "net_sharpe_neutral": sn["sharpe_neutral"],
                 "pct_in_market": float(_win(active_s, start).mean()),
                 "n_months": int(sg["n_months"]),
             })
 
-    comparison = pd.DataFrame(rows)
-    series = {
-        "net_always": base - cost_always,
-        "net_timed": timed_gross - cost_timed,
-        "flag": flag,
-        "spread": spread.reindex(eval_index),
-        "trailing": trailing.reindex(eval_index),
-    }
-    return comparison, series
+    return pd.DataFrame(rows)
 
 
 # --------------------------------------------------------------------------- #
-# Plotting
+# Consolidated performance table (project house style, one row per factor x book)
 # --------------------------------------------------------------------------- #
-def _shade_in_market(ax, flag: pd.Series) -> None:
-    """Shade contiguous spans of in-market months."""
-    s = flag.sort_index().astype(bool)
-    idx = s.index
-    start = None
-    for i, d in enumerate(idx):
-        on = bool(s.iloc[i])
-        if on and start is None:
-            start = d
-        if start is not None and (not on or i == len(idx) - 1):
-            ax.axvspan(start, d, color="C1", alpha=0.12, lw=0)
-            start = None
+_PERF_TITLE = (
+    "Factor-spread timing: always-on vs spread-timed long-short performance\n"
+    "(hold the Q5-Q1 book only when its top-minus-bottom factor-value spread exceeds "
+    f"its trailing {LOOKBACK}m average;  α = industry-neutral monthly return,  "
+    "Sharpe net cost = after-cost Sharpe)")
 
 
-def plot_cumulative(series: dict, comparison: pd.DataFrame, factor: str,
-                    path: Path) -> None:
-    """After-cost cumulative growth of $1: always-on vs spread-timed."""
-    full = comparison[comparison["window"] == "full"].set_index("book")
-    cum_a = (1.0 + series["net_always"].fillna(0.0)).cumprod()
-    cum_t = (1.0 + series["net_timed"].fillna(0.0)).cumprod()
-
-    fig, ax = plt.subplots(figsize=(11, 5))
-    _shade_in_market(ax, series["flag"])
-    ax.plot(cum_a.index, cum_a, color="C0", linewidth=1.3,
-            label=f"always-on  [Sharpe={full.loc['always_on', 'net_sharpe']:+.2f}, "
-                  f"alpha={full.loc['always_on', 'net_alpha']:+.4%}/mo, "
-                  f"t={full.loc['always_on', 'net_alpha_tstat']:+.2f}]")
-    ax.plot(cum_t.index, cum_t, color="C3", linewidth=1.3,
-            label=f"spread-timed  [Sharpe={full.loc['timed', 'net_sharpe']:+.2f}, "
-                  f"alpha={full.loc['timed', 'net_alpha']:+.4%}/mo, "
-                  f"t={full.loc['timed', 'net_alpha_tstat']:+.2f}]")
-    ax.axhline(1.0, color="black", linewidth=0.6)
-    ax.set_title(f"{factor} Q5-Q1 (after cost): always-on vs spread-timed\n"
-                 f"(enter only when the factor-value spread > its trailing "
-                 f"{LOOKBACK}m average; shaded = in-market months)")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Cumulative value of $1 (net of cost)")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
-
-
-def plot_signal(series: dict, factor: str, path: Path) -> None:
-    """The factor-value spread against its trailing average, in-market shaded."""
-    spread, trailing, flag = series["spread"], series["trailing"], series["flag"]
-    fig, ax = plt.subplots(figsize=(11, 4))
-    _shade_in_market(ax, flag)
-    ax.plot(spread.index, spread, color="C4", linewidth=1.0, label="factor-value spread (Q5-Q1)")
-    ax.plot(trailing.index, trailing, color="C3", linewidth=1.0, linestyle="--",
-            label=f"trailing {LOOKBACK}m average")
-    ax.set_title(f"Timing signal: {factor} top-minus-bottom-quintile factor-value spread")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Factor-value spread")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
-
-
-def plot_summary(summary: pd.DataFrame, path: Path) -> None:
-    """Grouped bars: always-on vs timed after-cost alpha t-stat per factor (full)."""
-    factors = summary["factor"].tolist()
-    x = np.arange(len(factors))
-    w = 0.38
-    fig, ax = plt.subplots(figsize=(11, 5))
-    ax.bar(x - w / 2, summary["always_net_alpha_t_full"], w, color="C0", label="always-on")
-    ax.bar(x + w / 2, summary["timed_net_alpha_t_full"], w, color="C3", label="spread-timed")
-    for thr in (1.65, 2.0):
-        ax.axhline(thr, color="grey", linewidth=0.7, linestyle=":")
-    ax.axhline(0.0, color="black", linewidth=0.6)
-    ax.set_xticks(x)
-    ax.set_xticklabels(factors, rotation=20, ha="right", fontsize=9)
-    ax.set_ylabel("After-cost industry-neutral alpha t-stat")
-    ax.set_title("Spread timing vs always-on: after-cost alpha t-stat by factor (full sample)\n"
-                 f"timing = hold only when the factor-value spread exceeds its trailing {LOOKBACK}m average")
-    ax.legend(loc="best", fontsize=9)
-    ax.grid(True, axis="y", alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
+def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[dict]:
+    """The always-on and spread-timed :func:`regression.render_alpha_table` rows for
+    one factor.  The gross (cost-free) L/S Sharpe and β-neutral Sharpe come from the
+    always-on / timed book unchanged; the combined "Sharpe net cost" column carries
+    this experiment's after-cost (net) raw and β-neutral Sharpe.  Alpha and industry
+    β are the gross book's, matching every other experiment's table (cost is shown
+    via the net-of-cost Sharpe and the average-cost column, not netted from α)."""
+    rows = []
+    for book, family in (("always_on", "always-on"), ("timed", "spread-timed")):
+        sub = comparison[comparison["book"] == book].set_index("window")
+        full, dec = sub.loc["full"], sub.loc["2016+"]
+        rows.append({
+            "factor": factor, "family": family, "direction": direction,
+            "alpha": full["gross_alpha"], "alpha_tstat": full["gross_alpha_tstat"],
+            "beta": full["ind_beta"], "beta_tstat": full["ind_beta_tstat"],
+            "sharpe": full["gross_sharpe"], "sharpe_neutral": full["sharpe_neutral"],
+            "sharpe_cost": full["net_sharpe"],
+            "sharpe_cost_neutral": full["net_sharpe_neutral"],
+            "avg_cost_pp": full["avg_cost"] * 100.0, "n": int(full["n_months"]),
+            "alpha_2016": dec["gross_alpha"], "alpha_tstat_2016": dec["gross_alpha_tstat"],
+            "beta_2016": dec["ind_beta"], "beta_tstat_2016": dec["ind_beta_tstat"],
+            "sharpe_2016": dec["gross_sharpe"], "sharpe_neutral_2016": dec["sharpe_neutral"],
+            "sharpe_cost_2016": dec["net_sharpe"],
+            "sharpe_cost_neutral_2016": dec["net_sharpe_neutral"],
+        })
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -309,7 +258,8 @@ def _pick(comparison: pd.DataFrame, book: str, window: str, col: str) -> float:
 
 
 def run(csv_path: Path = TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
-    """Test every top factor under the spread-timing rule and write all outputs."""
+    """Test every top factor under the spread-timing rule and write the single
+    consolidated performance table."""
     top = FM.load_top_factors(csv_path)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -324,35 +274,20 @@ def run(csv_path: Path = TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> pd.Data
     industry = C.industry_return()
     cost_panel = COST.build_cost_panel(UNIVERSE)
 
-    summary_rows = []
+    perf_rows = []
     print("\n  factor                  book        a_net/mo   a_net_t  cost/mo  %in   n")
     for r in top.itertuples():
-        panel = pd.read_csv(C.EXP2_DIR / r.subexperiment / "factor_panel.csv",
-                            parse_dates=["date"])
+        # Resolve the factor's source panel through composite (its library map),
+        # so a top factor from Experiment 1 (General) resolves as readily as one
+        # from an Experiment 2 subexperiment -- the hard-coded EXP2 path would miss
+        # it.  Same convention factor_momentum uses for the signed book.
+        panel_path = C.resolve_factors([r.factor]).iloc[0]["panel_path"]
+        panel = pd.read_csv(panel_path, parse_dates=["date"])
         panel["stock_id"] = panel["stock_id"].astype(str)
 
-        comparison, series = evaluate_factor(
+        comparison = evaluate_factor(
             r.factor, r.subexperiment, r.direction, panel, cost_panel, industry)
-
-        factor_dir = out_dir / r.factor
-        factor_dir.mkdir(parents=True, exist_ok=True)
-        comparison.to_csv(factor_dir / "timing_comparison.csv", index=False)
-        plot_cumulative(series, comparison, r.factor, factor_dir / "cumulative.png")
-        plot_signal(series, r.factor, factor_dir / "signal_timeline.png")
-
-        summary_rows.append({
-            "factor": r.factor, "subexperiment": r.subexperiment, "direction": r.direction,
-            "always_net_alpha_full": _pick(comparison, "always_on", "full", "net_alpha"),
-            "always_net_alpha_t_full": _pick(comparison, "always_on", "full", "net_alpha_tstat"),
-            "timed_net_alpha_full": _pick(comparison, "timed", "full", "net_alpha"),
-            "timed_net_alpha_t_full": _pick(comparison, "timed", "full", "net_alpha_tstat"),
-            "always_net_alpha_t_2016": _pick(comparison, "always_on", "2016+", "net_alpha_tstat"),
-            "timed_net_alpha_t_2016": _pick(comparison, "timed", "2016+", "net_alpha_tstat"),
-            "avg_cost_always": _pick(comparison, "always_on", "full", "avg_cost"),
-            "avg_cost_timed": _pick(comparison, "timed", "full", "avg_cost"),
-            "pct_in_market": _pick(comparison, "timed", "full", "pct_in_market"),
-            "n_months": int(_pick(comparison, "always_on", "full", "n_months")),
-        })
+        perf_rows.extend(_perf_rows(comparison, r.factor, r.direction))
 
         for book in ("always_on", "timed"):
             print(f"  {r.factor:<22} {book:<11} "
@@ -362,12 +297,14 @@ def run(csv_path: Path = TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> pd.Data
                   f"{_pick(comparison, book, 'full', 'pct_in_market'):4.0%}  "
                   f"{int(_pick(comparison, book, 'full', 'n_months')):>4}")
 
-    summary = pd.DataFrame(summary_rows)
-    summary.to_csv(out_dir / "spread_timing_summary.csv", index=False)
-    plot_summary(summary, out_dir / "spread_timing_comparison.png")
+    # One consolidated performance table for the whole experiment (all factors x
+    # both books), in the same house style as every other experiment's alpha table.
+    perf = pd.DataFrame(perf_rows)
+    C.R.render_alpha_table(perf, out_dir / "spread_timing_performance.png", title=_PERF_TITLE)
 
-    print(f"\nSaved spread-timing outputs -> {out_dir}")
-    return summary
+    print(f"\nSaved consolidated performance table -> "
+          f"{out_dir / 'spread_timing_performance.png'}")
+    return perf
 
 
 def main() -> None:

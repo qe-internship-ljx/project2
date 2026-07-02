@@ -142,17 +142,30 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
     sr_neutral_2016 = regression.beta_neutral_sharpe(
         spread[recent], industry_ret[industry_ret.index >= DECADE_START],
         mreg_2016["beta"])
-    avg_cost_pp = cost.average_cost(
-        cost.long_short_cost(panel, factor, cost_panel, N_TERTILES)) * 100.0
+    # Turnover cost of the tertile book: its mean (pp/month) plus the
+    # cost-incorporated Sharpe (raw + beta-neutral, full & 2016+).
+    cost_series = cost.long_short_cost(panel, factor, cost_panel, N_TERTILES)
+    avg_cost_pp = cost.average_cost(cost_series) * 100.0
+    sharpe_cost = regression.net_of_cost_sharpe(spread, cost_series)
+    sharpe_cost_neutral = regression.net_of_cost_neutral_sharpe(
+        spread, cost_series, industry_ret, mreg["beta"])
+    sharpe_cost_2016 = regression.net_of_cost_sharpe(spread, cost_series, start=DECADE_START)
+    sharpe_cost_neutral_2016 = regression.net_of_cost_neutral_sharpe(
+        spread, cost_series, industry_ret, mreg_2016["beta"], start=DECADE_START)
 
     return {
         "factor": factor, "family": family,
         "direction": "T3-T1" if sign > 0 else "T1-T3",
         "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
+        "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
         "sharpe": ls["sharpe"], "sharpe_neutral": sr_neutral,
+        "sharpe_cost": sharpe_cost, "sharpe_cost_neutral": sharpe_cost_neutral,
         "avg_cost_pp": avg_cost_pp, "n": mreg["n"],
         "alpha_2016": mreg_2016["alpha"], "alpha_tstat_2016": mreg_2016["alpha_tstat"],
+        "beta_2016": mreg_2016["beta"], "beta_tstat_2016": mreg_2016["beta_tstat"],
         "sharpe_2016": ls_2016["sharpe"], "sharpe_neutral_2016": sr_neutral_2016,
+        "sharpe_cost_2016": sharpe_cost_2016,
+        "sharpe_cost_neutral_2016": sharpe_cost_neutral_2016,
     }
 
 
