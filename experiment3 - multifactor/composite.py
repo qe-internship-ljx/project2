@@ -4,9 +4,11 @@ composite.py
 
 Experiment 3 -- composite z-score quintile long/short.
 
-Combine an arbitrary *set* of factors into one cross-sectional score -- the sum
-of each stock's sign-oriented factor z-scores -- and run Experiment 1's quintile
-workflow on that composite::
+Combine Experiment 2's **top five factors** -- the cross-experiment hand-off in
+``top_factors/top_factors.csv``, the same candidate set ``factor_momentum.py``
+rotates across -- into one cross-sectional score, the sum of each stock's
+sign-oriented factor z-scores, and run Experiment 1's quintile workflow on that
+composite::
 
     composite_{i,t} = sum_f  sign_f * zscore_{f,i,t}
 
@@ -23,8 +25,8 @@ therefore "attractive across the whole set", so the book is always long Q5 /
 short Q1 and no per-factor sign bookkeeping is left to the caller.
 
 This *replaces* Experiment 3's earlier t-stat-gated multivariate regression:
-there is **no significance gate and no regression model** -- the caller passes
-the factor set explicitly and the factors are combined by standardised
+there is **no significance gate and no regression model** -- the factor set is
+read from the hand-off and the factors are combined by standardised
 aggregation, the textbook "composite signal" construction.
 
 Design -- maximal reuse, zero duplication of the engine
@@ -47,20 +49,14 @@ Nothing generic is re-implemented:
 This module therefore adds only the *composite construction* and the per-set
 reporting; every input it consumes was produced upstream.
 
-Outputs (``output/composite/<slug>/``)
---------------------------------------
-    factor_set.png              the constituents: family, source, sign, standalone alpha
-    exposure_correlation.csv    pairwise correlation of the oriented constituent z-scores
-    quintile_returns.csv        months x {Q1..Q5, Q5-Q1}, mean next-period return
+Outputs (``output/composite/``)
+-------------------------------
     quintile_cumulative.png     the five buckets as cumulative growth of $1 (log scale)
-    long_short.png              the Q5-Q1 book's cumulative growth of $1
     performance.png             the L/S book's mean / t / Sharpe / industry-neutral alpha
 
 Run standalone::
 
-    python composite.py                                          # default set
-    python composite.py buyback_quality gross_profitability rd_stability
-    python composite.py top                                       # the active top-5 (Exp 1 + Exp 2)
+    python composite.py         # always the active top-5 hand-off
 """
 
 from __future__ import annotations
@@ -114,14 +110,17 @@ LIBRARIES: list[dict] = [
 # The cross-experiment top-factor hand-off (written by
 # ``experiment2 - sw factors/main.py``, ranking Experiment 1's general market
 # factors together with every Experiment 2 software subexperiment by alpha
-# t-stat); ``top_factors()`` reads its factor list.
+# t-stat); ``top_factors()`` reads its factor list.  The same collect step also
+# persists the FULL ranking (every tested factor, same row schema) -- modules
+# that sweep the whole candidate set (e.g. Experiment 4's spread timing) read
+# ``ALL_FACTORS_CSV`` instead.
 TOP_FACTORS_CSV = EXP2_DIR / "top_factors" / "top_factors.csv"
+ALL_FACTORS_CSV = EXP2_DIR / "top_factors" / "all_factors_ranked.csv"
 TOP_N = 5
 
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_FACTORS = ["buyback_quality", "gross_profitability", "rd_stability"]
 COMPOSITE_FACTOR = "composite"          # synthetic factor name fed to the reused sort
 N_QUINTILES = 5
 MONTHS_PER_YEAR = 12
@@ -516,39 +515,6 @@ def plot_long_short(spread: pd.Series, factor_names: list[str], sharpe: float,
     plt.close(fig)
 
 
-def render_factor_set(resolved: pd.DataFrame, path: Path) -> None:
-    """Render the composite's constituents as a shaded PNG (project house style)."""
-    headers = ["Factor", "Family", "Source", "Sign", "Standalone α", "Standalone α t"]
-    cell_text, cell_colors = [], []
-    for _, r in resolved.iterrows():
-        cell_text.append([
-            r["factor"], r["family"], r["library"],
-            "+1 (long high)" if r["sign"] > 0 else "-1 (long low)",
-            R._fmt_pct(r["alpha"]), R._fmt_num(r["alpha_tstat"])])
-        cell_colors.append(["white", "white", "white", "white", "white",
-                            R._tstat_color(r["alpha_tstat"])])
-
-    n = len(resolved)
-    fig, ax = plt.subplots(figsize=(13, 0.5 * (n + 1) + 1.2))
-    ax.axis("off")
-    tbl = ax.table(cellText=cell_text, colLabels=headers, cellColours=cell_colors,
-                   colWidths=[0.19, 0.24, 0.21, 0.14, 0.11, 0.11],
-                   cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
-    tbl.auto_set_font_size(False)
-    tbl.set_fontsize(9)
-    for j in range(len(headers)):
-        tbl[0, j].set_text_props(weight="bold", color="white")
-        tbl[0, j].set_facecolor("#404040")
-    for i in range(1, n + 1):
-        for j in (0, 1, 2):
-            tbl[i, j].set_text_props(ha="left")
-    fig.suptitle("Experiment 3 -- composite constituents (each oriented to its "
-                 "bullish direction before summing)", fontsize=11, y=0.99)
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.84, bottom=0.06)
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
 # Metric row = (label, stats-key, format, shade).  ``format`` is int/pct/num;
 # ``shade`` True tints the cell by the |t| significance of its own value (used for
 # t-stat rows).  ``book_stats`` keys are shared by every variant so this table
@@ -653,18 +619,17 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def run(factor_names: list[str] = DEFAULT_FACTORS,
-        label: str | None = None,
-        out_root: Path = OUTPUT_DIR) -> dict:
+def run(out_root: Path = OUTPUT_DIR) -> dict:
     """
-    Run the straight-sum composite pipeline for ``factor_names`` and write every
-    output under ``out_root / "composite" / <slug>``.  ``label`` overrides the
-    slug (default: the factor names joined by ``__``).  Returns the per-window
-    performance dict.
+    Run the straight-sum composite pipeline on the active top-five factors
+    (Experiment 2's ``top_factors.csv`` hand-off, the same candidate set
+    ``factor_momentum.py`` rotates across) and write the two outputs --
+    ``quintile_cumulative.png`` and ``performance.png`` -- under
+    ``out_root / "composite"``.  Returns the per-window performance dict.
     """
+    factor_names = top_factors()
     resolved = resolve_factors(factor_names)
-    slug = label or "__".join(factor_names)
-    out_dir = out_root / "composite" / slug
+    out_dir = out_root / "composite"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("=== Experiment 3: composite z-score quintile L/S ===")
@@ -673,7 +638,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
                     for r in resolved.itertuples()))
 
     # 1-2. Assemble the (sign-oriented, equal-weighted) composite and shape it.
-    composite, exposures = load_composite(resolved)
+    composite, _ = load_composite(resolved)
     panel = as_factor_panel(composite)
 
     # 3. Quintile sort (Experiment 1's code, unmodified).
@@ -699,12 +664,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
             "start": composite["date"].min(), "end": composite["date"].max()}
 
     # --- Persist outputs --------------------------------------------------- #
-    render_factor_set(resolved, out_dir / "factor_set.png")
-    exposures.corr().to_csv(out_dir / "exposure_correlation.csv")
-    wide.to_csv(out_dir / "quintile_returns.csv")
     plot_cumulative(wide, factor_names, out_dir / "quintile_cumulative.png")
-    plot_long_short(spread, factor_names, full["sharpe"], full["alpha"],
-                    full["alpha_tstat"], out_dir / "long_short.png")
     render_performance(
         windows, "Composite long-short (Q5-Q1) performance",
         f"{_set_label(factor_names)}   |   {meta['n_stocks']} stocks over "
@@ -727,13 +687,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
 
 
 def main() -> None:
-    args = sys.argv[1:]
-    if args and args[0] in {"top", "--top"}:
-        # Combine the active cross-experiment top factors into one composite.
-        names = top_factors()
-        run(names, label=f"top{len(names)}")
-    else:
-        run(args or DEFAULT_FACTORS)
+    run()
 
 
 if __name__ == "__main__":

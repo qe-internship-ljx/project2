@@ -12,6 +12,7 @@ own module and already runs standalone via ``python <module>.py``:
     weighted_composite.py  regression-premia-weighted composite L/S
     bivariate_tertile.py   double-sorted (tertile x tertile) intersection book
     factor_momentum.py     time-series factor momentum / rotation across the top factors
+    portfolio_overlay.py   equal-capital overlay of the top factors' univariate books
 
 ``factor_correlation.py`` is intentionally omitted: it is a panel-agnostic helper
 (no ``main``) invoked by other experiments to quantify factor redundancy, not a
@@ -45,6 +46,7 @@ _PIPELINES = [
     _THIS_DIR / "weighted_composite.py",
     _THIS_DIR / "bivariate_tertile.py",
     _THIS_DIR / "factor_momentum.py",
+    _THIS_DIR / "portfolio_overlay.py",
 ]
 
 

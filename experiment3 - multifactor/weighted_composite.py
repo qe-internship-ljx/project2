@@ -83,7 +83,7 @@ MIN_TRAIN_MONTHS = 2                             # need >=2 month-clusters for t
 OUTPUT_DIR = C.OUTPUT_DIR
 
 # The weighted deliverable's factor set (the factors whose marginal premia we
-# weight by).  Distinct from composite.py's equal-weighted DEFAULT_FACTORS.
+# weight by).  Distinct from composite.py's equal-weighted top-five set.
 DEFAULT_FACTORS = ["revenue_stability", "gross_profitability"]
 
 

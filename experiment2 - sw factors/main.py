@@ -48,6 +48,8 @@ leaders (see :func:`collect_top_factors`)::
       top_factors.csv                          the top N (hand-off for Experiment 3)
       top_factors.md                           the top N, with each factor's definition & intuition
       top_factors_long_short_market_alpha.png  the top N in the standard alpha-table format
+      quintile_long_short_market_alpha.png     every factor's quintile book (the
+                                               quintile counterpart of tertile.py's table)
 
 The ``top_factors.csv`` hand-off is what Experiment 3's ``factor_momentum.py``
 consumes.  ``Cross_val/`` is excluded from the ranking: it re-tests factors on the
@@ -585,6 +587,13 @@ def collect_top_factors(top_n: int = TOP_N) -> pd.DataFrame:
     plot_rows["family"] = plot_rows["family"] + "  [" + plot_rows["subexperiment"] + "]"
     regression.render_alpha_table(
         plot_rows, TOP_FACTORS_DIR / "top_factors_long_short_market_alpha.png")
+
+    # Also plot EVERY factor's quintile book in the same format -- the quintile
+    # counterpart of tertile.py's all-factor table.
+    plot_all = ranked.copy()
+    plot_all["family"] = plot_all["family"] + "  [" + plot_all["subexperiment"] + "]"
+    regression.render_alpha_table(
+        plot_all, TOP_FACTORS_DIR / "quintile_long_short_market_alpha.png")
 
     print(f"\n=== Top {top_n} factors across subexperiments "
           f"(by full-period + 2016-onward alpha t-stat) ===")

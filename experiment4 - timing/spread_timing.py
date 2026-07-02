@@ -2,14 +2,14 @@
 spread_timing.py
 ================
 
-Experiment 4 -- **factor-spread timing** of the top software factors.
+Experiment 4 -- **factor-spread timing** of every ranked software factor.
 
 The second timing module.  Rather than holding a factor's long/short book all the
 time, it asks whether the book should be entered *only when the factor's own
 cross-sectional dispersion is unusually wide* -- the classic "factor spread"
 predictability idea (a wide value spread between cheap and expensive names
-forecasts a larger value premium, and so on).  The rule, applied to each of
-Experiment 2's top-ranked factors:
+forecasts a larger value premium, and so on).  The rule, applied to every factor
+in Experiment 2's cross-experiment ranking:
 
     On each monthly rebalance day (formation month-end ``t``) measure the
     *factor-value spread* -- the average raw factor value of the top quintile
@@ -25,9 +25,10 @@ cost** of the timing overlay is charged explicitly (full liquidation on exit,
 re-establishment on re-entry) and the timed book is compared to the always-on
 book on an after-cost basis, over the common sample where the signal is defined.
 
-The candidate factors are exactly Experiment 2's top-factor hand-off
-(``experiment2 - sw factors/top_factors/top_factors.csv``), so re-running
-Experiment 2's ``collect`` step re-points this module automatically.
+The candidate factors are exactly Experiment 2's FULL cross-experiment ranking
+(``experiment2 - sw factors/top_factors/all_factors_ranked.csv`` -- every factor
+in ``quintile_long_short_market_alpha.png``, not just the top-5 hand-off), so
+re-running Experiment 2's ``collect`` step re-points this module automatically.
 
 Engine reuse (the project's dependency-injection convention)
 ------------------------------------------------------------
@@ -51,7 +52,7 @@ Run standalone::
     python spread_timing.py
 
 The single output is one consolidated performance table under
-``experiment4 - timing/output/spread_timing/``:
+``experiment4 - timing/output/``:
 
     spread_timing_performance.png  ONE consolidated performance table (project house
                                    style, one row per factor x book): gross (cost-free)
@@ -84,13 +85,13 @@ F = C.F                      # the Experiment 1 engine, wired for the software u
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-TOP_FACTORS_CSV = C.TOP_FACTORS_CSV
+CANDIDATES_CSV = C.ALL_FACTORS_CSV            # the FULL ranking, not the top-5 hand-off
 LOOKBACK = 6                                  # trailing months for the spread average
 N_QUINTILES = C.N_QUINTILES
 DECADE_START = C.DECADE_START                 # 2016-01-01, the project "past decade" cut-off
 OUTPUT_DIR = _THIS_DIR / "output"
 
-UNIVERSE = F.SOFTWARE_SERVICES                # every top factor lives on this cross-section
+UNIVERSE = F.SOFTWARE_SERVICES                # every candidate factor lives on this cross-section
 
 
 # --------------------------------------------------------------------------- #
@@ -257,49 +258,59 @@ def _pick(comparison: pd.DataFrame, book: str, window: str, col: str) -> float:
     return float(m[col].iloc[0])
 
 
-def run(csv_path: Path = TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
-    """Test every top factor under the spread-timing rule and write the single
+def run(csv_path: Path = CANDIDATES_CSV, out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
+    """Test every ranked factor under the spread-timing rule and write the single
     consolidated performance table."""
-    top = FM.load_top_factors(csv_path)
+    candidates = FM.load_top_factors(csv_path)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=== Experiment 4: factor-spread timing of the top factors ===")
-    print(f"Candidates ({len(top)}): " + ", ".join(
-        f"{r.factor} [{r.subexperiment}]" for r in top.itertuples()))
+    print("=== Experiment 4: factor-spread timing of every ranked factor ===")
+    print(f"Candidates ({len(candidates)}): " + ", ".join(
+        f"{r.factor} [{r.subexperiment}]" for r in candidates.itertuples()))
     print(f"Rule: hold the Q5-Q1 book in month t+1 only if the factor-value spread "
           f"at t exceeds its trailing {LOOKBACK}m average (after-cost).")
 
     # Built once and shared: the within-industry "market" return and the cost panel
-    # (every top factor trades the same Software & Services cross-section).
+    # (every candidate factor trades the same Software & Services cross-section).
     industry = C.industry_return()
     cost_panel = COST.build_cost_panel(UNIVERSE)
 
-    perf_rows = []
-    print("\n  factor                  book        a_net/mo   a_net_t  cost/mo  %in   n")
-    for r in top.itertuples():
-        # Resolve the factor's source panel through composite (its library map),
-        # so a top factor from Experiment 1 (General) resolves as readily as one
-        # from an Experiment 2 subexperiment -- the hard-coded EXP2 path would miss
-        # it.  Same convention factor_momentum uses for the signed book.
-        panel_path = C.resolve_factors([r.factor]).iloc[0]["panel_path"]
-        panel = pd.read_csv(panel_path, parse_dates=["date"])
+    # Resolve every candidate to its source panel through composite (its library
+    # map), so a factor from Experiment 1 (General) resolves as readily as one
+    # from an Experiment 2 subexperiment.  Evaluation then walks the candidates
+    # panel-by-panel -- composite's ``build_exposures`` convention -- so each
+    # (large) library panel is read from disk exactly once for the whole sweep.
+    resolved = C.resolve_factors(candidates["factor"].tolist())
+    candidates = candidates.merge(resolved[["factor", "panel_path"]],
+                                  on="factor", how="left")
+
+    perf_by_factor: dict[str, list[dict]] = {}
+    print("\n  factor                          book        a_net/mo   a_net_t  cost/mo  %in   n")
+    for panel_path, grp in candidates.groupby("panel_path", sort=False):
+        panel = pd.read_csv(panel_path, parse_dates=["date"],
+                            usecols=["date", "stock_id", "factor", "value",
+                                     "zscore", "next_return"])
         panel["stock_id"] = panel["stock_id"].astype(str)
 
-        comparison = evaluate_factor(
-            r.factor, r.subexperiment, r.direction, panel, cost_panel, industry)
-        perf_rows.extend(_perf_rows(comparison, r.factor, r.direction))
+        for r in grp.itertuples():
+            comparison = evaluate_factor(
+                r.factor, r.subexperiment, r.direction, panel, cost_panel, industry)
+            perf_by_factor[r.factor] = _perf_rows(comparison, r.factor, r.direction)
 
-        for book in ("always_on", "timed"):
-            print(f"  {r.factor:<22} {book:<11} "
-                  f"{_pick(comparison, book, 'full', 'net_alpha'):+.4%} "
-                  f"{_pick(comparison, book, 'full', 'net_alpha_tstat'):+7.2f}  "
-                  f"{_pick(comparison, book, 'full', 'avg_cost') * 100:6.4f}  "
-                  f"{_pick(comparison, book, 'full', 'pct_in_market'):4.0%}  "
-                  f"{int(_pick(comparison, book, 'full', 'n_months')):>4}")
+            for book in ("always_on", "timed"):
+                print(f"  {r.factor:<30} {book:<11} "
+                      f"{_pick(comparison, book, 'full', 'net_alpha'):+.4%} "
+                      f"{_pick(comparison, book, 'full', 'net_alpha_tstat'):+7.2f}  "
+                      f"{_pick(comparison, book, 'full', 'avg_cost') * 100:6.4f}  "
+                      f"{_pick(comparison, book, 'full', 'pct_in_market'):4.0%}  "
+                      f"{int(_pick(comparison, book, 'full', 'n_months')):>4}")
 
     # One consolidated performance table for the whole experiment (all factors x
     # both books), in the same house style as every other experiment's alpha table.
-    perf = pd.DataFrame(perf_rows)
+    # Rows are re-assembled in the hand-off's rank order (evaluation above walked
+    # the candidates panel-by-panel, not by rank).
+    perf = pd.DataFrame([row for factor in candidates["factor"]
+                         for row in perf_by_factor[factor]])
     C.R.render_alpha_table(perf, out_dir / "spread_timing_performance.png", title=_PERF_TITLE)
 
     print(f"\nSaved consolidated performance table -> "
