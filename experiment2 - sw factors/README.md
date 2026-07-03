@@ -8,7 +8,8 @@ average turnover cost.
 
 > The standalone realized-dilution test was dropped per the updated project
 > proposal. The share-count change it measured is still used as one input to
-> `buyback_quality`. Four established factors remain.
+> `buyback_quality`. Four established factors remain, later joined by the
+> generic `fscore` / `zscore` composites read straight off `fundamental_master`.
 >
 > The *search for genuinely new* software-industry factors (§3.2) — extrapolating
 > the R&D activity software firms rely on — is pursued in the **R&D-behaviour
@@ -36,19 +37,60 @@ with **no change to Experiment 1**.
 
 ```
 sw_factors.py          # software factor library (drop-in for the engine's interface)
-main.py                # driver: wires sw_factors -> 'factors', runs quintile + regression
-standard/              # established §2.2 factors (sibling RD/ holds the R&D-behaviour search)
+main.py                # driver: wires sw_factors -> 'factors', runs quintile + regression,
+                       #   then the software subexperiments, then the top-factor collection
+driver_utils.py        # shared driver boilerplate (engine wiring, pipeline, redundancy step)
+tertile.py             # re-evaluates EVERY factor with tertile (T3-T1) books instead of quintiles
+Standard/              # established §2.2 factors (outputs of sw_factors.py)
     factor_panel.csv
     quintile/   <factor>/{quintile_returns.csv, quintile_cumulative.png, long_short.png}
                 + summary.csv + long_short_market_alpha.{csv,png}   # alpha table incl. avg cost
     regression/ <factor>/{regression.csv, beta.png} + summary.csv + summary_table.png
+                + normalized_regression.{csv,png}
+    factor_correlation/ <factor>/...   # redundancy of each factor vs the Exp1 general factors
+RD/                    # R&D-behaviour factor library (rd_factors.py + main_rd.py)
+Rev & Cost/            # revenue/cost-dynamics factor library (revcost_factors.py + main_revcost.py)
+Stability/             # fundamental-consistency factor library (stability_factors.py + main_stability.py)
+Skew/                  # return/growth skewness factor library (skew_factors.py + main_skew.py)
+Cross_val/             # re-test of the top factors on Banks+Insurance+Commodity Producers
+top_factors/           # cross-subexperiment ranking + hand-off for Experiments 3-5
 ```
+
+Each subexperiment folder mirrors `Standard/`'s layout (`factor_panel.csv`,
+`quintile/`, `regression/`, `factor_correlation/`) and is driven by its own
+`main_*.py`, which injects its factor library into the shared Experiment 1
+engine via `driver_utils.wire_engine` — exactly as `main.py` does for
+`sw_factors.py`. The build → quintile → regression → redundancy flow itself is
+`driver_utils.run_pipeline`; each driver keeps only its library, universe and
+labels.
+
+## Subexperiments
+
+| Folder | Library | Factors |
+|---|---|---|
+| `Standard/` | `sw_factors.py` | `intangible_value`, `intangible_profitability`, `rd_productivity`, `buyback_quality`, `fscore`, `zscore` |
+| `RD/` | `rd_factors.py` | `rd_growth`, `rd_conversion`, `rd_stability`, `innovation_mix`, `rd_intensity` — see `RD/R&D factors.md`; `rd_stability` is the keeper |
+| `Rev & Cost/` | `revcost_factors.py` | `revenue_stability`, `deferred_rev_intensity`, `cost_scalability`, `labor_productivity`, `gross_margin` — see `Rev & Cost/Theory & hypothesis.md` and `results.md` |
+| `Stability/` | `stability_factors.py` | second moments of quality: `cashflow_stability`, `return_stability`, `gross_profitability_stability` |
+| `Skew/` | `skew_factors.py` | `return_skewness`, `revenue_growth_skewness`, `eps_skewness` (all long-low: lottery/lumpiness aversion) |
+| `Cross_val/` | `crossval_factors.py` | re-tests the top `TOP_N` ranked factors on the **Banks + Insurance + Commodity Producers** universe (excluded from the ranking — different cross-section) |
+
+After all subexperiments finish, `main.py` **collects** every
+`quintile/long_short_market_alpha.csv` (Experiment 1's general factors on the
+software universe + every software subexperiment), ranks all factors by the sum
+of their full-period and 2016+ alpha t-stats, and writes the hand-off consumed
+by Experiments 3–5 to `top_factors/`:
+`all_factors_ranked.csv`, `top_factors.csv` (top 5), `top_factors.md` (with each
+factor's definition & intuition), and the rendered alpha tables.
 
 ## Run
 
 ```bash
-python main.py            # full pipeline (panel + both analyses + cost summary)
-python sw_factors.py      # rebuild the factor panel only
+python main.py            # Standard pipeline + software subexperiments + top-factor collection
+python main.py collect    # only (re)collect the top factors from existing CSVs
+python Cross_val/main_crossval.py   # run manually AFTER the collection (reads top_factors.csv)
+python sw_factors.py      # rebuild the Standard factor panel only
+python tertile.py         # tertile re-evaluation -> top_factors/tertile_long_short_market_alpha.png
 ```
 
 ## Factors
@@ -56,8 +98,10 @@ python sw_factors.py      # rebuild the factor panel only
 `K_int` is the intangible (knowledge) capital stock from past R&D by perpetual
 inventory, `K_int_t = (1−δ)·K_int_{t−1} + R&D_t` (Peters & Taylor 2017), δ=0.20,
 run monthly on `rd_ltm/12`. All signals are ratios / log-changes and therefore
-currency-neutral. Long/short direction is set empirically by each factor's
-Fama–MacBeth t-stat sign (as in Experiment 1); `dir` below is the academic prior.
+currency-neutral. Long/short direction follows each factor's **canonical
+(academic-prior) direction** (`USE_CANONICAL_LS_DIRECTION = True` in
+`sw_factors.py`), not the in-sample Fama–MacBeth t-stat sign; `dir` below is
+that prior.
 
 **Established software factors (§2.2)**
 
@@ -67,6 +111,8 @@ Fama–MacBeth t-stat sign (as in Experiment 1); `dir` below is the academic pri
 | `intangible_profitability` | (operating_income_ltm + R&D) / (assets + K_int) | long high |
 | `rd_productivity` | Δsales_ltm (YoY) / K_int | long high |
 | `buyback_quality` | realised share reduction − gross buyback yield | long high |
+| `fscore` | Piotroski F-score (from `fundamental_master`) | long high |
+| `zscore` | Altman Z-score (from `fundamental_master`) | long high |
 
 `buyback_quality` reconciles cash spent on buybacks against the *actual* fall in
 share count: `(1 − shares_t/shares_{t−12m}) − (−buyback_ltm / mcap)`. It is

@@ -13,10 +13,9 @@ equal-count buckets on the factor z-score, then measure the **next-period**
     * ``output/quintile/<factor>/quintile_cumulative.png`` -- the five buckets
       shown as cumulative growth of $1 (log scale).
 
-A cross-factor ``output/quintile/summary.csv`` reports each bucket's mean
-monthly return plus the long-short (Q5-Q1) mean, t-stat, Sharpe and annualised
-spread.  (Trading cost and the cumulative long/short portfolio plot live with
-the regression outputs -- see ``regression.py`` -- which signs the book and
+The long-short (Q5-Q1) mean, t-stat, Sharpe and annualised spread are printed
+per factor as the sort runs.  (Trading cost and the cumulative long/short
+portfolio plot live with the regression outputs -- see ``regression.py`` -- which signs the book and
 writes ``output/quintile/<factor>/long_short.png`` and the
 ``long_short_market_alpha`` table.)
 
@@ -38,7 +37,6 @@ import pandas as pd
 
 import factors as F
 
-QUINTILE_DIR = F.OUTPUT_DIR / "quintile"
 N_QUINTILES = 5
 QCOLS = [f"Q{i}" for i in range(1, N_QUINTILES + 1)]
 MONTHS_PER_YEAR = 12
@@ -110,13 +108,12 @@ def plot_cumulative(wide: pd.DataFrame, factor: str, path: Path) -> None:
 # Driver
 # --------------------------------------------------------------------------- #
 def run(panel: pd.DataFrame | None = None,
-        u: "F.Universe" = F.SOFTWARE_SERVICES) -> pd.DataFrame:
+        u: "F.Universe" = F.SOFTWARE_SERVICES) -> None:
     if panel is None:
         panel = F.load_panel(u=u)
     quintile_dir = u.output_dir / "quintile"
     quintile_dir.mkdir(parents=True, exist_ok=True)
 
-    summary_rows = []
     for factor in F.FACTOR_NAMES:
         factor_dir = quintile_dir / factor
         factor_dir.mkdir(parents=True, exist_ok=True)
@@ -124,14 +121,8 @@ def run(panel: pd.DataFrame | None = None,
         wide.to_csv(factor_dir / "quintile_returns.csv")
         plot_cumulative(wide, factor, factor_dir / "quintile_cumulative.png")
 
-        row = {"factor": factor, "family": F.FACTORS[factor]["family"]}
-        row.update({q: wide[q].mean() for q in QCOLS})
-        row.update(long_short_stats(wide["Q5-Q1"]))
-        summary_rows.append(row)
-        print(f"  {factor:<22} Q5-Q1 monthly={row['mean_monthly']:+.4%} "
-              f"(t={row['tstat']:+.2f}, Sharpe={row['sharpe']:+.2f}, n={row['n_months']})")
+        stats = long_short_stats(wide["Q5-Q1"])
+        print(f"  {factor:<22} Q5-Q1 monthly={stats['mean_monthly']:+.4%} "
+              f"(t={stats['tstat']:+.2f}, Sharpe={stats['sharpe']:+.2f}, n={stats['n_months']})")
 
-    summary = pd.DataFrame(summary_rows)
-    summary.to_csv(quintile_dir / "summary.csv", index=False)
     print(f"\nSaved quintile outputs -> {quintile_dir}")
-    return summary

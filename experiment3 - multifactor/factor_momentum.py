@@ -9,18 +9,21 @@ industry-neutral alpha t-stat (the hand-off written by
 ``experiment2 - sw factors/main.py`` to ``top_factors/top_factors.csv``) and run
 a **factor-momentum** strategy on them:
 
-    each month, hold the single factor whose own long/short book earned the most
-    over the *trailing 12 months*.
+    re-select every 3 months the single factor whose own long/short book earned
+    the most over the *trailing 12 months*, and hold that pick -- rebalanced
+    monthly -- until the next 3-monthly selection.
 
 Every candidate factor's standalone dollar-neutral long/short book is the
 bullish-oriented Q5-Q1 spread Experiments 1 & 2 already computed (long the
 high-z quintile when the factor's ``direction`` is ``Q5-Q1``, else long the low-z
 quintile -- the same orientation used in its published ``long_short.png``).  At
-each formation month ``t`` we look at which candidate earned the highest
-compounded spread over the *trailing 12 months* ``t-12 .. t-1`` -- all
-*realised* returns, known before ``t`` -- and hold that one factor's book over
-month ``t``.  Selecting on already-realised returns makes the rule strictly
-look-ahead free.
+each formation month ``t`` (every 3rd month) we look at which candidate earned the
+highest compounded spread over the *trailing 12 months* ``t-12 .. t-1`` -- all
+*realised* returns, known before ``t`` -- and hold that one factor's book until the
+next 3-monthly selection.  Because each candidate's spread is its monthly-rebalanced
+Q5-Q1 series, the held book still rebalances monthly to that factor's current
+quintiles; only the *choice* of factor is refreshed every 3 months.  Selecting on
+already-realised returns makes the rule strictly look-ahead free.
 
 The rotation is evaluated exactly like every other long/short book in the
 project: its monthly return is regressed on the market-cap-weighted Software &
@@ -48,28 +51,28 @@ statistics produced upstream.
 A second pipeline -- ``bivariate``
 ----------------------------------
 Alongside the one-factor-at-a-time rotation, this module also tests *combining*
-the momentum winners.  **Every month** it ranks the candidates by their
+the momentum winners.  **Every 3 months** it ranks the candidates by their
 **trailing-12-month univariate long/short return** (the same realised,
-look-ahead-free window the rotation selects on), takes the **top two**, and that
-month jointly generates a portfolio from them via ``bivariate_tertile``'s
+look-ahead-free window the rotation selects on), takes the **top two**, and
+jointly generates a portfolio from them via ``bivariate_tertile``'s
 independent double sort (long the top-tertile-of-both / short the
-bottom-tertile-of-both).  The chosen pair is re-selected each month, so the book
-is the month-by-month corner spread of whichever pair momentum favours -- the
-double-sort mechanics (tertiles, corner legs, grid, turnover cost) are reused
-wholesale from ``bivariate_tertile``; this module adds only the monthly pair
-selection.  The 3x3 grid diagnostic averages each cell over all months regardless
-of which pair produced it (rows = tertile on the month's #1 momentum factor,
+bottom-tertile-of-both).  The chosen pair is re-selected every 3 months and its
+double sort rebalanced monthly in between, so the book is the corner spread of
+whichever pair momentum favours -- the double-sort mechanics (tertiles, corner legs, grid, turnover cost)
+are reused wholesale from ``bivariate_tertile``; this module adds only the 3-monthly
+pair selection.  The 3x3 grid diagnostic averages each cell over all months regardless
+of which pair produced it (rows = tertile on the block's #1 momentum factor,
 columns = tertile on its #2).
 
 Outputs (``output/factor_momentum/``)
 -------------------------------------
-``univariate/`` -- the monthly single-factor rotation:
+``univariate/`` -- the 3-monthly single-factor rotation:
     factor_momentum_cumulative.png   growth of $1 in the rotation
     selection_timeline.png           which factor is held each month + how often
     performance.png                  rotation performance (full / 2016+), with the alpha
     factor_momentum_returns.csv      monthly chosen factor + rotation/constituent returns
     selection_counts.csv             how many months each factor was selected
-``bivariate/`` -- the monthly-reselected double sort of the trailing-12m top two:
+``bivariate/`` -- the 3-monthly-reselected double sort of the trailing-12m top two:
     long_short.png                   growth of $1 in the rotating double-sort book
     grid_mean_return.png             3x3 tertile grid, cell returns averaged over all months
     performance.png                  book performance (full / 2016+), with the alpha
@@ -148,9 +151,26 @@ def build_spread_matrix(top: pd.DataFrame) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
-# Step 2 -- the monthly rotation
+# Step 2 -- the 3-monthly rotation
 # --------------------------------------------------------------------------- #
 LOOKBACK = 12                                    # formation window (months) for selection
+HOLD = 3                                          # re-select every HOLD months (book still rebalances monthly)
+
+
+def _hold_selection(per_month: pd.Series) -> pd.Series:
+    """
+    Collapse a *per-month* selection into one that is re-formed only every
+    :data:`HOLD` months and held constant in between.
+
+    The pick at each formation month -- positions ``0, HOLD, 2*HOLD, ...`` of the
+    (monthly, gap-free) index -- is kept and forward-filled across the intervening
+    months, so the *choice* is refreshed every ``HOLD`` months and held until the
+    next formation.  (The held book itself still rebalances monthly, since each
+    candidate's return is a monthly-rebalanced spread.)  Works for both the
+    single-factor rotation (string picks) and the top-two pair selector (tuple picks).
+    """
+    formation = per_month.iloc[::HOLD]
+    return formation.reindex(per_month.index, method="ffill")
 
 
 def trailing_returns(spreads: pd.DataFrame, lookback: int = LOOKBACK) -> pd.DataFrame:
@@ -161,7 +181,7 @@ def trailing_returns(spreads: pd.DataFrame, lookback: int = LOOKBACK) -> pd.Data
     ``(1 + spread)`` shifted one month, so row ``t`` spans the realised months
     ``t-lookback .. t-1`` -- strictly prior to ``t``, keeping any selection built on
     it look-ahead free.  The first ``lookback`` months have no full window and are
-    dropped.  Shared by the monthly rotation and the top-two pair selector.
+    dropped.  Shared by the 3-monthly rotation and the top-two pair selector.
     """
     panel = spreads.dropna()                     # months with all candidates present
     trailing = ((1.0 + panel).rolling(lookback).apply(np.prod, raw=True) - 1.0)
@@ -175,35 +195,42 @@ def factor_momentum(spreads: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
 
     Returns ``(rotated, chosen)``:
 
-      * ``rotated`` -- the rotation's monthly return: each month hold the factor
-        with the highest *trailing 12-month* compounded return (see
-        :func:`trailing_returns`), i.e. over the ``LOOKBACK`` months ending in the
-        *previous* month.
-      * ``chosen``  -- the factor held each month (the rotation's choice).
+      * ``rotated`` -- the rotation's monthly return: every :data:`HOLD` months
+        select the factor with the highest *trailing 12-month* compounded return
+        (see :func:`trailing_returns`), i.e. over the ``LOOKBACK`` months ending in
+        the *previous* month, then hold that factor's monthly-rebalanced book until
+        the next selection.  Each month earns that held factor's monthly spread.
+      * ``chosen``  -- the factor held each month (constant within each ``HOLD``-month
+        block, re-formed at the block boundaries).
     """
     panel = spreads.dropna()                     # months with all candidates present
     prior = trailing_returns(spreads)            # trailing-12m return known at formation
-    chosen = prior.idxmax(axis=1)                # best trailing-12m factor as of last month
+    per_month = prior.idxmax(axis=1)             # best trailing-12m factor as of last month
+    chosen = _hold_selection(per_month)          # refresh the pick every HOLD months (book rebalances monthly)
     rotated = (pd.Series({t: panel.at[t, chosen[t]] for t in chosen.index},
                          name="factor_momentum")
                  .sort_index())
     return rotated, chosen.loc[rotated.index].rename("chosen_factor")
 
 
-def monthly_top_pairs(spreads: pd.DataFrame, lookback: int = LOOKBACK) -> pd.Series:
+def held_top_pairs(spreads: pd.DataFrame, lookback: int = LOOKBACK) -> pd.Series:
     """
-    Each formation month's top-two momentum factors, re-selected every month.
+    The top-two momentum factors, re-selected every :data:`HOLD` months and held
+    (with monthly rebalancing) until the next selection.
 
-    For each month a candidate is ranked by its *trailing* ``lookback``-month
+    At each formation month a candidate is ranked by its *trailing* ``lookback``-month
     univariate long/short return (:func:`trailing_returns`, realised over
     ``t-lookback .. t-1`` so the pick is look-ahead free), and the two strongest are
-    taken as an ordered ``(best, second)`` tuple.  Returns a Series of these tuples
-    indexed by formation month -- the pair the bivariate double sort combines that
-    month.
+    taken as an ordered ``(best, second)`` tuple.  The pair chosen at each
+    ``HOLD``-month boundary is held constant over the block (see
+    :func:`_hold_selection`); the double sort of that pair still rebalances monthly.
+    Returns a Series of these tuples indexed by month -- the pair the bivariate
+    double sort combines that month.
     """
     trailing = trailing_returns(spreads, lookback)
-    return trailing.apply(
+    per_month = trailing.apply(
         lambda row: tuple(row.sort_values(ascending=False).head(2).index), axis=1)
+    return _hold_selection(per_month)
 
 
 # --------------------------------------------------------------------------- #
@@ -254,7 +281,7 @@ def plot_cumulative(rotated: pd.Series, factor_names: list[str], sharpe: float,
     ax.axhline(1.0, color="black", linewidth=0.6)
     ax.set_yscale("log")
     ax.set_title(
-        "Factor-momentum long-short: each month hold the trailing-12m best factor\n"
+        "Factor-momentum long-short: every 3 months hold the trailing-12m best factor\n"
         f"candidates: {', '.join(factor_names)}\n"
         f"[Sharpe={sharpe:+.2f}, alpha={alpha:+.4%}/mo, t(alpha)={alpha_tstat:+.2f}]")
     ax.set_xlabel("Month")
@@ -304,15 +331,16 @@ def plot_selection(chosen: pd.Series, factor_names: list[str], path: Path) -> No
 # --------------------------------------------------------------------------- #
 def run_univariate(top: pd.DataFrame, spreads: pd.DataFrame,
                    out_dir: Path = UNIVARIATE_DIR) -> dict:
-    """The monthly factor-momentum rotation: hold the single trailing-12m best
-    factor each month.  Writes every rotation output under ``out_dir`` and returns
-    the per-window performance dict."""
+    """The 3-monthly factor-momentum rotation: every 3 months select the single
+    trailing-12m best factor and hold it (rebalanced monthly) until the next
+    selection.  Writes every rotation output under ``out_dir`` and returns the
+    per-window performance dict."""
     factor_names = top["factor"].tolist()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("--- univariate rotation (hold the trailing-12m best single factor) ---")
+    print("--- univariate rotation (every 3 months hold the trailing-12m best single factor) ---")
 
-    # Monthly rotation over the candidates' signed L/S books.
+    # 3-monthly rotation over the candidates' signed L/S books.
     rotated, chosen = factor_momentum(spreads)
 
     # Performance vs the industry, exactly as every project book is measured.
@@ -367,8 +395,8 @@ def run_univariate(top: pd.DataFrame, spreads: pd.DataFrame,
     return {lbl: s for lbl, s in windows}
 
 
-# Grid / plot axis labels for the rotating double sort: the pair changes monthly,
-# so the axes are the momentum *ranks* rather than fixed factor names.
+# Grid / plot axis labels for the rotating double sort: the pair changes every 3
+# months, so the axes are the momentum *ranks* rather than fixed factor names.
 BIVARIATE_AXES = ["trailing-12m best factor", "trailing-12m 2nd-best factor"]
 
 
@@ -398,16 +426,17 @@ def rotating_double_sort(pairs: pd.Series) -> pd.DataFrame:
 
 
 def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
-    """Re-select the two strongest trailing-12m univariate factors *each month* and
-    combine them with ``bivariate_tertile``'s independent double sort, writing the
-    rotating book's outputs under ``out_dir``.  Only the monthly pair selection lives
-    here; the double-sort mechanics and diagnostics are reused from
-    ``bivariate_tertile``.  Returns the per-window performance dict."""
+    """Re-select the two strongest trailing-12m univariate factors *every 3 months*
+    and combine them with ``bivariate_tertile``'s independent double sort (rebalanced
+    monthly between selections), writing the rotating book's outputs under ``out_dir``.
+    Only the 3-monthly pair selection lives here; the double-sort mechanics and
+    diagnostics are reused from ``bivariate_tertile``.  Returns the per-window
+    performance dict."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    print("--- bivariate double sort (monthly top two by trailing-12m univariate return) ---")
+    print("--- bivariate double sort (3-monthly top two by trailing-12m univariate return) ---")
 
-    # 1. Monthly pair selection, then the rotating double-sorted cross-section.
-    pairs = monthly_top_pairs(spreads)
+    # 1. 3-monthly pair selection, then the rotating double-sorted cross-section.
+    pairs = held_top_pairs(spreads)
     frame = rotating_double_sort(pairs)
     book = BT.bivariate_book(frame)                  # rotating corner spread per month
     grids = BT.grid_stats(frame)                     # cells averaged across all months/pairs
@@ -446,7 +475,7 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
                        full["alpha_tstat"], out_dir / "long_short.png")
     C.render_performance(
         windows, "Bivariate factor-momentum double sort: long-short performance",
-        "each month double-sort the trailing-12m top two factors (long top-tertile-of-both / "
+        "every 3 months double-sort the trailing-12m top two factors (long top-tertile-of-both / "
         "short bottom-tertile-of-both)   |   "
         f"{len(spread)} months ({start:%Y-%m} .. {end:%Y-%m})   |   "
         "industry-neutral alpha from the market-cap-weighted industry return.   "
@@ -468,7 +497,7 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
 
 def run(csv_path: Path = TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> dict:
     """Build both Experiment-3 factor-momentum pipelines from the top-factor
-    hand-off -- the monthly one-factor rotation (``univariate/``) and the double
+    hand-off -- the 3-monthly one-factor rotation (``univariate/``) and the double
     sort of the trailing-12m top two (``bivariate/``) -- and write every output
     under ``out_dir``.  Returns ``{"univariate": ..., "bivariate": ...}`` per-window
     performance dicts."""

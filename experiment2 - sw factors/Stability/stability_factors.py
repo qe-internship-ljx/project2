@@ -7,9 +7,10 @@ Services* universe, standardise each cross-sectionally (z-score vs the industry
 mean), and write a tidy monthly panel to ``Stability/factor_panel.csv``.
 
 This module, its driver and its outputs all live in experiment2's
-``Stability/`` subfolder.  It is a *fifth* factor library for Experiment 2
-(alongside ``sw_factors.py`` -> ``standard/``, ``rd_factors.py`` -> ``RD/``,
-``cash_conversion`` and ``Rev & Cost/``).  Like the others it is a **drop-in for
+``Stability/`` subfolder.  It is one of Experiment 2's factor libraries
+(alongside ``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/``,
+``revcost_factors.py`` -> ``Rev & Cost/`` and ``skew_factors.py`` ->
+``Skew/``).  Like the others it is a **drop-in for
 Experiment 1's analysis engine**: the quintile sorts, cross-sectional
 (Fama-MacBeth) regressions, long/short books, trading-cost model and every plot
 are reused **verbatim** from
@@ -19,44 +20,28 @@ definitions* and the fundamentals they need are new here, and the universe's
 ``output_dir`` is the ``Stability/`` folder itself, so these factors never
 collide with the other libraries.
 
-Motivation -- second moments of earnings
-----------------------------------------
+Motivation -- second moments of quality
+---------------------------------------
 The R&D extension (``rd_factors.py``) found that the one keeper among the R&D
 behaviour signals was ``rd_stability`` -- the trailing coefficient of variation
 of R&D intensity -- i.e. a *second moment* (consistency), not a level.  This
-module pushes that idea onto the bottom line, where earnings *quality* lives:
-stable, predictable earnings are a recognised quality dimension (Dichev & Tang
-2009, "earnings volatility and future earnings"; Graham, Harvey & Rajgopal 2005
-on smoothing).  Low-volatility earners are rewarded with lower cost of capital
-and tend to outperform on a risk-adjusted basis.
+module pushes that idea across the quality complex: stable, predictable
+fundamentals are a recognised quality dimension (Dichev & Tang 2009, "earnings
+volatility and future earnings"; Graham, Harvey & Rajgopal 2005 on smoothing).
+It scores the consistency of cash generation, of gross profitability, and of the
+return stream.  Steady, low-volatility franchises are rewarded with a lower cost
+of capital and tend to outperform on a risk-adjusted basis.
 
-    name                          definition                                                       dir          dimension
-    ----------------------------  ---------------------------------------------------------------  ----------   -----------
-    earning_stability             - trailing 12m coeff. of variation of EPS                        long high    earnings consistency
-    rd_earning_stability          - trailing 12m coeff. of variation of (EPS / trailing-36m        long high    R&D-vs-earnings consistency
-                                    avg R&D intensity)
-    cashflow_stability            - trailing 12m coeff. of variation of OCF margin                 long high    cash-generation consistency
-    return_stability              - trailing 12m coeff. of variation of monthly return             long high    return consistency (low-vol)
-    gross_profitability_stability - trailing 12m coeff. of variation of GP/assets                  long high    gross-profitability consistency
+    name                              definition                                                        dir         dimension
+    --------------------------------  ----------------------------------------------------------------  ----------  -----------
+    cashflow_stability                - trailing 12m coeff. of variation of OCF margin                  long high   cash-generation consistency
+    return_stability                  - trailing 12m coeff. of variation of monthly return              long high   return consistency (low-vol)
+    gross_profitability_stability     - trailing 12m coeff. of variation of GP/assets                   long high   gross-profitability consistency
 
-All factors use a **trailing 12-month** window (down from 36m): a shorter window
-makes each stability score a more *current* read on consistency and roughly
-triples the number of scorable stock-months at the front of each name's history.
+All three factors are *level*-consistency signals and use a **trailing 12-month**
+window: a short window makes each score a *current* read on consistency and
+maximises scorable stock-months at the front of each name's history.
 
-* ``earning_stability`` is the negative trailing-12m coefficient of variation
-  (std / |mean|) of diluted EPS (``earnings_ltm / diluted_shares_outstanding``).
-  High (near 0) => steady, predictable earnings; very negative => erratic
-  earnings.  A pure second moment, orthogonal by construction to every earnings
-  *level* / valuation signal in the project.
-* ``rd_earning_stability`` is the negative trailing-12m coefficient of variation
-  of the ratio ``EPS / avg_rd_intensity``, where ``avg_rd_intensity`` is the
-  firm's **trailing-36m average R&D intensity** (``rd_ltm / sales_ltm``).  It
-  measures how steadily earnings are delivered per unit of the firm's baseline
-  reinvestment posture: normalising EPS by a slow-moving (36m) R&D-intensity base
-  puts high- and low-R&D firms on a comparable footing, then the 12m coefficient
-  of variation scores the consistency of that earnings-per-reinvestment stream.
-  A firm that earns steadily against its established R&D level scores high; one
-  whose earnings swing relative to that base scores low.
 * ``cashflow_stability`` is the negative trailing-12m coefficient of variation of
   the operating cash-flow margin (``operating_cf_ltm / sales_ltm``).  It watches
   the consistency of *cash* generation -- harder to manage and a
@@ -81,20 +66,21 @@ triples the number of scorable stock-months at the front of each name's history.
   margin it is almost always positive in software and currency-neutral (a ratio
   of same-currency line items), so the near-zero-mean guard rarely binds.
 
-EPS sign instability (important)
---------------------------------
-Roughly a third of software stock-months carry *negative* earnings, and EPS can
-cross zero within a trailing window, so a raw std/mean coefficient of variation
-is sign-unstable and explosive.  We therefore (a) use the **absolute** mean in
-the denominator (``std / |mean|`` -- the standard robust CoV for series that may
-be negative) and (b) treat the score as **undefined when the window mean is
-small relative to the window's average magnitude** (``|mean| < MIN_MEAN_REL *
-mean|x|``), i.e. when earnings oscillate around zero and the CoV carries no
-information.  Both the ratio std/|mean| and the guard |mean|/mean|x| are ratios
-of same-currency quantities, so the factors are **currency-neutral** -- no FX
-conversion is needed for within-industry comparison, consistent with the rest of
-the project.  (A fixed absolute floor like ``rd_stability``'s would be
-currency-dependent and is therefore inappropriate for a per-share quantity.)
+Sign instability (important)
+----------------------------
+Some inputs here cross zero within a trailing window -- monthly returns swing
+sign every month and the OCF margin can turn negative -- so a raw std/mean
+coefficient of variation is sign-unstable and explosive.  We
+therefore (a) use the **absolute** mean in the denominator (``std / |mean|`` --
+the standard robust CoV for series that may be negative) and (b) treat the score
+as **undefined when the window mean is small relative to the window's average
+magnitude** (``|mean| < MIN_MEAN_REL * mean|x|``), i.e. when the series
+oscillates around zero and the CoV carries no information.  Both the ratio
+std/|mean| and the guard |mean|/mean|x| are ratios of same-currency quantities,
+so the factors are **currency-neutral** -- no FX conversion is needed for
+within-industry comparison, consistent with the rest of the project.  (A fixed
+absolute floor like ``rd_stability``'s would be currency-dependent and is
+therefore inappropriate here.)
 
 Run standalone to (re)build the panel::
 
@@ -175,12 +161,9 @@ OUTPUT_DIR = Path(__file__).resolve().parent
 INDUSTRY_GROUP = "Software & Services"
 
 # Estimation windows / parameters.
-STAB_WINDOW = 12            # trailing months for the coefficient-of-variation moment
+STAB_WINDOW = 12            # trailing months for the level-consistency CoV moment
 STAB_MIN_PERIODS = 9        # require >=9 of the trailing 12 months before a score exists
-                            # (the same ~2/3-of-window coverage the 36m window used)
-RD_AVG_WINDOW = 36          # trailing months for rd_earning_stability's R&D-intensity base
-RD_AVG_MIN_PERIODS = 24     # require >=24 of the trailing 36 months (~2/3 coverage)
-                            # before the R&D-intensity base is defined
+                            # (~2/3-of-window coverage)
 MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction of
                             # the trailing mean magnitude (mean|x|); below it the
                             # series oscillates around zero and the CoV is undefined.
@@ -194,8 +177,6 @@ MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction
 # in-sample t-stat), so a negative realised alpha t-stat means the factor worked
 # *against* the hypothesis -- exactly what we want for hypothesis testing.
 FACTORS: dict[str, dict] = {
-    "earning_stability":    {"family": "Earnings stability (EPS consistency)",            "higher_is_bullish": True},
-    "rd_earning_stability": {"family": "R&D-earnings stability (EPS-per-R&D-intensity consistency)", "higher_is_bullish": True},
     "cashflow_stability":    {"family": "Cash-flow stability (OCF-margin consistency)",      "higher_is_bullish": True},
     "return_stability":      {"family": "Return stability (monthly-return consistency)",     "higher_is_bullish": True},
     "gross_profitability_stability": {"family": "Gross-profitability stability (GP/assets consistency)", "higher_is_bullish": True},
@@ -230,10 +211,8 @@ def universe_from_argv(default: Universe = SOFTWARE_SERVICES) -> Universe:
 def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     """
     Point-in-time monthly fundamentals carrying everything the stability factors
-    need: LTM earnings (net income), R&D expense, sales, LTM gross income (for
-    gross margin and gross profitability), total assets (for gross
-    profitability), LTM operating cash flow (for the OCF margin), and the diluted
-    share count used to turn earnings into EPS.
+    need: sales and LTM operating cash flow (for the OCF margin), and LTM gross
+    income and total assets (for gross profitability).
 
     Each record carries ``observation_date`` (when the report became
     observable); we align on it in :func:`build_monthly_panel` via the shared
@@ -241,23 +220,11 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     to Experiment 1 / ``sw_factors.py`` / ``rd_factors.py``.
     """
     base_cols = ["date_fundamental", "observation_date", "stock_id",
-                 "earnings_ltm", "rd_ltm", "sales_ltm", "gross_income_ltm",
-                 "operating_cf_ltm", "assets"]
+                 "sales_ltm", "gross_income_ltm", "operating_cf_ltm", "assets"]
     fm = pd.read_feather(DATA_DIR / "fundamental_master.feather", columns=base_cols)
     fm["stock_id"] = fm["stock_id"].astype(str)
     fm = fm[fm["stock_id"].isin(universe)].copy()
 
-    # Diluted share count lives in the extended fundamentals table.  It has no
-    # observation_date but shares the date_fundamental grid, so it merges on that
-    # key and inherits the observation_date above (same convention as
-    # sw_factors.py / the engine).
-    ext = pd.read_feather(
-        DATA_DIR / "Industry Fundamentals Data" / "fundamental_master_extended.feather",
-        columns=["date_fundamental", "stock_id", "diluted_shares_outstanding"])
-    ext["stock_id"] = ext["stock_id"].astype(str)
-    ext = ext[ext["stock_id"].isin(universe)]
-
-    fm = fm.merge(ext, on=["stock_id", "date_fundamental"], how="left")
     fm["date_fundamental"] = pd.to_datetime(fm["date_fundamental"])
     fm["observation_date"] = pd.to_datetime(fm["observation_date"])
     return fm
@@ -305,25 +272,6 @@ def build_monthly_panel(universe: pd.Index | None = None,
 # --------------------------------------------------------------------------- #
 # Building blocks
 # --------------------------------------------------------------------------- #
-def _eps_series(p: pd.DataFrame) -> pd.Series:
-    """Diluted EPS = LTM earnings / diluted shares outstanding (may be negative).
-
-    Local-currency per-share earnings; only used inside currency-neutral
-    coefficient-of-variation ratios, so no FX conversion is required."""
-    earnings = p["earnings_ltm"].astype(float)
-    shares = p["diluted_shares_outstanding"].astype(float)
-    return earnings / shares.where(shares > 0.0)
-
-
-def _rd_intensity_series(p: pd.DataFrame) -> pd.Series:
-    """R&D / sales, the operating R&D-intensity ratio (sales must be positive).
-    R&D is floored at 0 (a few reported R&D values are negative restatement
-    artefacts; genuine R&D cannot be negative)."""
-    sales = p["sales_ltm"].astype(float)
-    rd = p["rd_ltm"].astype(float).clip(lower=0.0)
-    return rd / sales.where(sales > 0.0)
-
-
 def _ocf_margin_series(p: pd.DataFrame) -> pd.Series:
     """Operating cash-flow margin = LTM operating cash flow / LTM sales (sales
     must be positive).
@@ -360,26 +308,28 @@ def _gross_profitability_series(p: pd.DataFrame) -> pd.Series:
     return gross / assets.where(assets > 0.0)
 
 
-def _neg_coeff_of_variation(p: pd.DataFrame, x: pd.Series) -> pd.Series:
+def _neg_coeff_of_variation(p: pd.DataFrame, x: pd.Series,
+                            window: int = STAB_WINDOW,
+                            min_periods: int = STAB_MIN_PERIODS) -> pd.Series:
     """
-    Negative trailing-:data:`STAB_WINDOW`-month robust coefficient of variation
-    of ``x`` per stock: ``-std / |mean|``.  High (near 0) => steady; very
-    negative => erratic.
+    Negative trailing-``window``-month robust coefficient of variation of ``x``
+    per stock: ``-std / |mean|``.  High (near 0) => steady; very negative =>
+    erratic.
 
-    Uses the **absolute** mean so a sign flip in ``x`` (earnings can be negative)
-    does not flip the score, and marks the score undefined when ``|mean|`` is
-    small relative to the window's average magnitude (the series oscillates
-    around zero -> CoV uninformative).  Requires :data:`STAB_MIN_PERIODS` of
-    history.
+    Uses the **absolute** mean so a sign flip in ``x`` (the OCF margin and
+    monthly returns can be negative) does not flip the score, and marks the score
+    undefined when ``|mean|`` is small relative to the window's average magnitude
+    (the series oscillates around zero -> CoV uninformative).  Requires
+    ``min_periods`` of history over the 12m level-consistency window.
     """
     g = x.groupby(p["stock_id"], observed=True)
-    mean = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).mean())
-    std = g.transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std())
-    abs_mean = g.transform(lambda s: s.abs().rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).mean())
+    mean = g.transform(lambda s: s.rolling(window, min_periods=min_periods).mean())
+    std = g.transform(lambda s: s.rolling(window, min_periods=min_periods).std())
+    abs_mean = g.transform(lambda s: s.abs().rolling(window, min_periods=min_periods).mean())
 
     denom = mean.abs()
     # Undefined where the mean is dominated by sign cancellation (near-zero net
-    # earnings around which the series oscillates) -- the CoV carries no signal.
+    # level around which the series oscillates) -- the CoV carries no signal.
     denom = denom.where(denom >= MIN_MEAN_REL * abs_mean)
     cov = std / denom
     return -cov
@@ -388,40 +338,6 @@ def _neg_coeff_of_variation(p: pd.DataFrame, x: pd.Series) -> pd.Series:
 # --------------------------------------------------------------------------- #
 # Factor definitions
 # --------------------------------------------------------------------------- #
-def _f_earning_stability(p: pd.DataFrame) -> pd.Series:
-    """
-    Earnings stability: the negative trailing-12m robust coefficient of
-    variation of diluted EPS.  High => steady, predictable earnings (a quality
-    hallmark -- low earnings volatility commands a lower cost of capital and
-    predicts better risk-adjusted returns; Dichev & Tang 2009); very negative =>
-    erratic earnings.  A second moment, orthogonal by construction to every
-    earnings-level / valuation signal in the project.
-    """
-    return _neg_coeff_of_variation(p, _eps_series(p))
-
-
-def _f_rd_earning_stability(p: pd.DataFrame) -> pd.Series:
-    """
-    R&D-earnings stability: the negative trailing-12m robust coefficient of
-    variation of ``EPS / avg_rd_intensity``, where ``avg_rd_intensity`` is the
-    firm's trailing-36m average R&D intensity (``rd_ltm / sales_ltm``).
-    Normalising EPS by a slow-moving (36m) R&D-intensity base puts firms with
-    different reinvestment levels on a comparable footing, then the 12m
-    coefficient of variation scores the consistency of the resulting
-    earnings-per-reinvestment stream: a firm that earns steadily against its
-    established R&D level scores high; one whose earnings swing relative to that
-    base scores low.  Combines the R&D-discipline idea of ``rd_stability`` with
-    the earnings dimension of ``earning_stability``.
-    """
-    eps = _eps_series(p)
-    rd_intensity = _rd_intensity_series(p)
-    avg_rd_intensity = (rd_intensity.groupby(p["stock_id"], observed=True)
-                        .transform(lambda s: s.rolling(
-                            RD_AVG_WINDOW, min_periods=RD_AVG_MIN_PERIODS).mean()))
-    ratio = eps / avg_rd_intensity.where(avg_rd_intensity > 0.0)
-    return _neg_coeff_of_variation(p, ratio)
-
-
 def _f_cashflow_stability(p: pd.DataFrame) -> pd.Series:
     """
     Cash-flow stability: the negative trailing-12m robust coefficient of
@@ -465,8 +381,6 @@ def _f_gross_profitability_stability(p: pd.DataFrame) -> pd.Series:
 
 
 _FACTOR_FUNCS = {
-    "earning_stability": _f_earning_stability,
-    "rd_earning_stability": _f_rd_earning_stability,
     "cashflow_stability": _f_cashflow_stability,
     "return_stability": _f_return_stability,
     "gross_profitability_stability": _f_gross_profitability_stability,

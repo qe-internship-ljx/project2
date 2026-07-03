@@ -102,7 +102,6 @@ LIBRARIES: list[dict] = [
     _exp2_lib("Standard", "software-industry factors"),
     _exp2_lib("RD", "R&D-behaviour factors"),
     _exp2_lib("Rev & Cost", "revenue/cost factors"),
-    _exp2_lib("Growth", "growth factors"),
     _exp2_lib("Stability", "stability factors"),
     _exp2_lib("Skew", "skew factors"),
 ]

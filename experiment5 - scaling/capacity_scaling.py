@@ -5,7 +5,7 @@ capacity_scaling.py
 Re-evaluate **exactly the same set of factors** as
 ``experiment2 - sw factors/tertile.py`` -- Experiment 1's general market factors
 plus every Experiment 2 software subexperiment (Standard, RD, Rev & Cost,
-Growth, Stability, Skew) -- but change **how the two legs are weighted**.
+Stability, Skew) -- but change **how the two legs are weighted**.
 
 Where the standard quintile book (and ``tertile.py``) equal-weights every name
 inside the top and bottom bucket, here each name is weighted by a monotone

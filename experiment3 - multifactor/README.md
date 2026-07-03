@@ -18,15 +18,27 @@ factor set explicitly, and the factors are combined by standardised aggregation 
 the textbook "composite signal" construction. (This replaces the earlier
 t-stat-gated pooled *regression*; see [Changed from the regression model](#changed-from-the-regression-model).)
 
-Two ways to weight the constituents, sharing one spine:
+Five ways to combine the factors, sharing one spine (plus the redundancy tool):
 
-| Module | Combination | Weights | Evaluation |
-|---|---|---|---|
-| [`composite.py`](composite.py) | equal-weighted (straight sum) | each factor's bullish sign `±1` | full sample + past decade |
-| [`weighted_composite.py`](weighted_composite.py) | coefficient-weighted | **expanding-window** regression premia, refit every month | **walk-forward out-of-sample (2007+)** |
+| Module | Combination | Evaluation |
+|---|---|---|
+| [`composite.py`](composite.py) | equal-weighted z-score sum (signs `±1`), quintile sort | full sample + past decade |
+| [`weighted_composite.py`](weighted_composite.py) | coefficient-weighted score — **expanding-window** regression premia, refit every month | **walk-forward out-of-sample (2007+)** |
+| [`bivariate_tertile.py`](bivariate_tertile.py) | independent 3×3 **double sort** on two factors — long T3∩T3, short T1∩T1 (plus a coarser median-split "half" rule) | full sample + past decade |
+| [`factor_momentum.py`](factor_momentum.py) | **rotation**: hold the factor (univariate) or double-sort the **top two** factors (bivariate) with the best trailing-12m book return — re-selected every 3 months, book rebalanced monthly | full sample + past decade |
+| [`portfolio_overlay.py`](portfolio_overlay.py) | equal-capital **overlay** of the top-5 standalone books (1/5 each, turnover netted per name across books) | full sample + past decade |
+| [`factor_correlation.py`](factor_correlation.py) | redundancy tool — R² of an industry factor on Experiment 1's general factors | — |
+
+[`main.py`](main.py) orchestrates all five pipelines, each in its own
+subprocess (they share the dependency-injected Experiment 1 engine, so they must
+not share an interpreter), in dependency order: `composite` →
+`weighted_composite` → `bivariate_tertile` → `factor_momentum` →
+`portfolio_overlay`.
 
 The weighted variant is described under
 [Coefficient-weighted variant](#coefficient-weighted-variant-expanding-window-walk-forward--weighted_compositepy);
+the double sort, rotation and overlay under
+[Other combinations](#other-combinations--bivariate_tertilepy-factor_momentumpy-portfolio_overlaypy);
 the rest of this section covers the equal-weighted `composite.py`.
 
 ## What it does (`composite.py`)
@@ -84,12 +96,19 @@ expanding-window walk-forward.
 ## Run
 
 ```bash
+python main.py                                               # all five pipelines, in order
+
 python composite.py                                          # equal-weighted, default set (below)
 python composite.py buyback_quality gross_profitability rd_stability
 python -c "from composite import run; run(['earnings_yield','sue','beta'])"
 
 python weighted_composite.py                                 # coefficient-weighted, expanding-window walk-forward
 python weighted_composite.py buyback_quality gross_profitability rd_stability
+
+python bivariate_tertile.py                                  # double sort, default pair (return_stability x gross_profitability)
+python bivariate_tertile.py revenue_stability gross_profitability
+python factor_momentum.py                                    # univariate rotation + bivariate top-two double sort
+python portfolio_overlay.py                                  # equal-capital overlay of the top-5 books
 ```
 
 Requires Experiments 1 and 2 (and, for R&D factors, the R&D extension) to have
@@ -217,6 +236,44 @@ reference premia), `beta_path.{csv,png}` and `tstat_path.{csv,png}` (the
 expanding-window weights and t-stats over time), `long_short.png` (the walk-forward
 book's growth of $1), and `performance.png` (the walk-forward summary). No quintile
 files are written — the sort is an internal step.
+
+## Other combinations — `bivariate_tertile.py`, `factor_momentum.py`, `portfolio_overlay.py`
+
+All three reuse `composite.py`'s spine (`resolve_factors` / `load_exposures`,
+`industry_return`, `book_stats`, `attach_net_cost_sharpe`, `render_performance`),
+so "alpha", the cost model and the net-of-cost Sharpe are defined identically to
+every other book in the project.
+
+**`bivariate_tertile.py` — independent double sort.** Every month the
+cross-section is split into three equal-count tertiles on each of two factors
+(default pair: `return_stability` × `gross_profitability`); the book is long the
+T3∩T3 corner and short the T1∩T1 corner, equal-weighted within each leg. A
+coarser **half-intersection** rule (median split, ~1/4 of names per corner
+instead of ~1/9) is reported alongside to show whether the edge survives a
+milder, higher-capacity cut. Outputs land under
+`output/bivariate_tertile/<slug>/` (`grid_mean_return.png` 3×3 heatmap,
+`bivariate_returns.csv`, `long_short.png`, `performance.png` — including alpha
+over each constituent's standalone book and single-name ownership for a $100M
+book — plus a `half/` mirror).
+
+**`factor_momentum.py` — rotation across the top factors.** Two pipelines over
+Experiment 2's `top_factors.csv` hand-off:
+*univariate* — every 3 months select the single factor whose own long/short book
+earned the most over the trailing 12 months (all realised, look-ahead-free) and
+hold it, rebalanced monthly, until the next selection;
+*bivariate* — every 3 months take the trailing-12m **top two** factors and trade
+their `bivariate_tertile` double sort, re-selecting the pair every 3 months (the
+double sort still rebalances monthly in between). Outputs
+land under `output/factor_momentum/{univariate,bivariate}/` (cumulative growth,
+selection timeline / grid diagnostic, `performance.png`).
+
+**`portfolio_overlay.py` — naive diversification baseline.** Hold all five
+top-factor standalone books at once, 1/5 of capital each. Unlike `composite.py`
+(which merges *signals* and re-sorts) the overlay merges the finished
+*portfolios*; the five signed weight vectors are **netted per name** before the
+cost model charges turnover, so a stock long in one book and short in another
+only pays cost on the residual trade. Output:
+`output/portfolio_overlay/performance.png`.
 
 ## Factor redundancy — `factor_correlation.py`
 

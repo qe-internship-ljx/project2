@@ -15,7 +15,7 @@ mirroring the default ``output/`` layout one-for-one::
 
     output/banks_insurance/
       factor_panel.csv
-      quintile/    <factor>/...   + summary.csv
+      quintile/    <factor>/...
       regression/  <factor>/...   + summary.csv + summary_table.png
 
 Run standalone::

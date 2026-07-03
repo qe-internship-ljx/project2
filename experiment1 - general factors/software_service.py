@@ -15,7 +15,7 @@ mirroring the ``banks_insurance`` / ``commodity_producers`` layout one-for-one::
 
     output/software/
       factor_panel.csv
-      quintile/    <factor>/...   + summary.csv
+      quintile/    <factor>/...
       regression/  <factor>/...   + summary.csv + summary_table.png
 
 This is the canonical entry point for the default-universe outputs (the role
@@ -87,13 +87,13 @@ def plot_universe_size(u: "F.Universe" = UNIVERSE) -> Path:
 def plot_smallest_mcap(u: "F.Universe" = UNIVERSE) -> Path:
     """
     Plot the smallest USD market cap among *active* stocks each month, before and
-    after the bottom-10% relative screen.
+    after the bottom-20% relative screen.
 
     "Active" is the full pre-screen monthly cross-section (``build_monthly_panel``)
     restricted to names with an established USD cap.  The two lines are:
-      * **without the bottom-10% filter** -- the min cap over all active names, i.e.
+      * **without the bottom-20% filter** -- the min cap over all active names, i.e.
         the very smallest name in the universe that month.
-      * **with the bottom-10% filter** -- the min cap over the names that survive
+      * **with the bottom-20% filter** -- the min cap over the names that survive
         :func:`factors.apply_mcap_screen`; because the relative floor drops the
         lowest ``min_mcap_pct`` by cap each month, this is the effective size floor
         the strategy actually trades at.

@@ -13,21 +13,24 @@ alpha and its average turnover cost under the project's trading-cost model.
 |------|------|
 | `factors.py` | Loads the raw data, builds the monthly panel, computes each factor and its industry z-score, and writes `output/software/factor_panel.csv`. Also the shared library (`load_panel`, `prepare_slice`, `assign_quintiles`, `ols`, `attach_pit_fundamentals`, the `Universe` dataclass). |
 | `quintile.py` | **Approach 1** — sorts each month into 5 even (equal-count) z-score quintiles and computes each bucket's next-period mean return. |
-| `regression.py` | **Approach 2** — each month, regresses next-period return on the factor z-score across all securities (OLS), producing one monthly beta series (the cross-sectional factor premium). Also signs each factor's dollar-neutral long/short book, regresses it on the industry return for the **industry-neutral alpha** table, and tags each book with its average turnover cost. |
+| `regression.py` | **Approach 2** — each month, regresses next-period return on the factor z-score across all securities (OLS), producing one monthly beta series (the cross-sectional factor premium). Also runs a **pooled** time-and-cross-section regression of the industry-relative return on the z-score (month-clustered SEs → `normalized_regression.csv`), signs each factor's dollar-neutral long/short book, regresses it on the industry return for the **industry-neutral alpha** table, and tags each book with its average turnover cost and **net-of-cost Sharpe** (raw and β-neutral). |
 | `cost.py` | The project's trading-cost model (plan §1) and the **average turnover cost** of each long/short quintile book. Imported by `regression.py`; runnable standalone. |
+| `software_service.py` | Driver for the default **Software & Services** universe: builds the panel once, runs `quintile.run` + `regression.run` on it, and adds two universe diagnostics — `universe_size.png` (names per month) and `smallest_mcap.png` (effective size floor before/after the cap screen). |
 | `banks_insurance.py` | Thin driver that runs the **identical** pipeline on the **Banks + Insurance** cross-section (`gics_industry_name in {Banks, Insurance}`), writing to `output/banks_insurance/`. |
 | `commodity_producers.py` | Thin driver that runs the **identical** pipeline on the **Commodity Producers** cross-section (`gics_industry_name in {Metals & Mining, Oil, Gas & Consumable Fuels}`), writing to `output/commodity_producers/`. |
 
-Run in order (each step caches under `output/software/`):
+Run (each step caches under `output/software/`):
 
 ```bash
-python factors.py      # build output/software/factor_panel.csv
-python quintile.py     # approach 1 -> output/software/quintile/
-python regression.py   # approach 2 -> output/software/regression/ (+ the alpha table)
+python software_service.py   # full pipeline: panel -> quintile/ -> regression/ (+ diagnostics)
+python factors.py            # or: only (re)build output/software/factor_panel.csv
 ```
 
-`quintile.py` / `regression.py` auto-build the panel if it is missing;
-`regression.py` also computes the long/short alpha table and turnover cost.
+`software_service.py` auto-builds the panel if it is missing, then runs both
+approaches on the shared panel; `regression.py`'s run also computes the
+long/short alpha table, turnover cost and net-of-cost Sharpe. `quintile.py`
+and `regression.py` are libraries (no CLI) — they are driven by the
+universe drivers and, downstream, by Experiments 2–5.
 
 ### Other universes
 
@@ -41,8 +44,8 @@ python banks_insurance.py          # -> output/banks_insurance/{factor_panel.csv
 python commodity_producers.py      # -> output/commodity_producers/{factor_panel.csv, quintile/, regression/}
 ```
 
-Each module also accepts a universe slug on the command line, e.g.
-`python factors.py banks_insurance`, `python quintile.py banks_insurance`.
+`factors.py` and `cost.py` also accept a universe slug on the command line,
+e.g. `python factors.py banks_insurance`.
 
 ## Factors (main signal of each family)
 
@@ -154,7 +157,10 @@ universes mirror the same layout under `output/banks_insurance/` and
 
 ```
 output/software/
-  factor_panel.csv                      # tidy: date, stock_id, factor, value, zscore, next_return
+  factor_panel.csv                      # tidy: date, stock_id, factor, value, zscore,
+                                        #   next_return, weight (formation-date USD mcap)
+  universe_size.png                     # names per month (software driver only)
+  smallest_mcap.png                     # effective size floor, before/after cap screen
   quintile/
     <factor>/
       quintile_returns.csv              # months x Q1..Q5 + Q5-Q1 spread
@@ -162,11 +168,14 @@ output/software/
       long_short.png                    # the signed Q5-Q1 book's cumulative growth of $1
     summary.csv                         # per-factor quintile means + long-short stats
     long_short_market_alpha.csv         # per-factor industry-neutral alpha, β, Sharpe,
-    long_short_market_alpha.png         #   avg turnover cost, β-neutral Sharpe (full & 2016+)
+    long_short_market_alpha.png         #   avg turnover cost, β-neutral & net-of-cost
+                                        #   Sharpe (full & 2016+)
   regression/
     <factor>/
       regression.csv                    # months x {beta, alpha, tstat, r2, n}
       beta.png                          # monthly beta over time (with time-series mean)
     summary.csv                         # per-factor mean beta + FM t-stat + L/S stats (full & 2016+)
     summary_table.png                   # rendered table of the above
+    normalized_regression.csv           # pooled industry-relative return per 1σ of factor
+    normalized_regression_table.png     #   (month-clustered t-stats), full & 2016+
 ```

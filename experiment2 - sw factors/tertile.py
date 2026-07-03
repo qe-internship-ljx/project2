@@ -4,7 +4,7 @@ tertile.py
 
 Re-evaluate **every** factor tested on the Software & Services universe -- both
 Experiment 1's general market factors and every Experiment 2 software
-subexperiment (Standard, RD, Rev & Cost, Growth, Stability, Skew) -- with a
+subexperiment (Standard, RD, Rev & Cost, Stability, Skew) -- with a
 **tertile** long/short book (long the top third, short the bottom third) in
 place of the quintile (top / bottom fifth) book, then render the whole set in a
 single alpha table in the *same* format as
@@ -77,7 +77,7 @@ DECADE_START = regression.DECADE_START   # 2016+ ("past decade") window, shared
 # Experiment 2 software subexperiment); ``Cross_val/`` is likewise excluded -- it
 # re-tests factors on Banks+Insurance, a different universe.
 # --------------------------------------------------------------------------- #
-_EXP2_LIBS = ["Standard", "RD", "Rev & Cost", "Growth", "Stability", "Skew"]
+_EXP2_LIBS = ["Standard", "RD", "Rev & Cost", "Stability", "Skew"]
 
 
 def _source(label: str, panel: Path, alpha_csv: Path) -> dict:

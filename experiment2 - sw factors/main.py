@@ -24,17 +24,18 @@ Experiment 1 layout one-for-one::
 
     Standard/
       factor_panel.csv
-      quintile/    <factor>/...   + summary.csv + summary_table.png
-                                  + long_short_market_alpha.{csv,png}
+      quintile/    <factor>/...   + long_short_market_alpha.{csv,png}
       regression/  <factor>/...   + summary.csv + summary_table.png
       factor_correlation/<factor>/...   redundancy of each software factor vs
                                         the Exp1 general market factors
 
 After the Standard run finishes, this driver also runs every sibling
-subexperiment (``RD/``, ``Rev & Cost/``, ``Growth/``, ``Stability/``,
-``Cross_val/``) by invoking each one's ``main_*.py`` in its own subprocess.
-Each subexperiment binds ``factors`` to its own library at import time, so they
-must not share an interpreter -- a subprocess per driver keeps them isolated.
+subexperiment (``RD/``, ``Rev & Cost/``, ``Stability/``, ``Skew/``) by invoking
+each one's ``main_*.py`` in its own subprocess.  Each subexperiment binds
+``factors`` to its own library at import time, so they must not share an
+interpreter -- a subprocess per driver keeps them isolated.  (``Cross_val/`` is
+run manually *after* the top-factor collection below: its library resolves the
+factors to re-test from ``top_factors/top_factors.csv``.)
 
 Cross-subexperiment top-factor collection
 -----------------------------------------
@@ -64,7 +65,6 @@ Run standalone::
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -72,61 +72,15 @@ from pathlib import Path
 import pandas as pd
 
 import sw_factors as S
+import driver_utils as D
 
 # --- Dependency injection: make Experiment 1's analysis modules reuse our
-#     software-factor library.  ``quintile`` / ``regression`` (and ``cost``) do
-#     ``import factors as F``; binding ``factors`` -> ``sw_factors`` here means
-#     every reference (FACTOR_NAMES, FACTORS, prepare_slice, load_panel, ols,
-#     load_prices, ...) targets the software factors, with zero changes to
-#     Experiment 1.
-sys.modules["factors"] = S
-
-_EXP1_DIR = Path(__file__).resolve().parent.parent / "experiment1 - general factors"
-_EXP3_DIR = Path(__file__).resolve().parent.parent / "experiment3 - multifactor"
-sys.path.insert(0, str(_EXP1_DIR))
-
-import quintile        # noqa: E402  (import after sys.modules / sys.path wiring)
-import regression      # noqa: E402
+#     software-factor library (``driver_utils.wire_engine`` binds ``factors``
+#     -> ``sw_factors`` before importing them, so every reference targets the
+#     software factors with zero changes to Experiment 1).
+quintile, regression = D.wire_engine(S)
 
 UNIVERSE = S.SOFTWARE_SERVICES
-
-
-def _load_factor_correlation():
-    """Load Experiment 3's panel-agnostic factor_correlation module by path
-    (its folder name contains spaces, so it cannot be imported normally)."""
-    spec = importlib.util.spec_from_file_location(
-        "sw_factor_correlation", _EXP3_DIR / "factor_correlation.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def run_correlation_analysis() -> None:
-    """
-    Quantify how much of each established software factor is already explained by
-    Experiment 1's 9 general market factors.  Writes one R^2 table per factor
-    under ``Standard/factor_correlation/<factor>/``.
-    """
-    fc = _load_factor_correlation()
-
-    target_panel = UNIVERSE.panel_path                              # Standard/factor_panel.csv
-    general_panel = _EXP1_DIR / "output" / "software" / "factor_panel.csv"
-    corr_root = UNIVERSE.output_dir / "factor_correlation"
-
-    if not general_panel.exists():
-        print(f"  [skip] Exp1 general market factors: {general_panel} not found "
-              f"(build experiment1's software panel first)")
-        return
-
-    print(f"\n--- Redundancy of software factors vs general "
-          f"(Exp1 general market factors) ---")
-    for factor in S.FACTOR_NAMES:
-        fc.run(target_factor=factor,
-               target_panel=target_panel,
-               market_panel=general_panel,
-               out_dir=corr_root / factor,
-               include_market_cap=True)
 
 # --- Sibling subexperiments.  Each lives in its own subfolder with its own
 #     factor library and `main_*.py` driver that does the same ``import factors
@@ -186,7 +140,7 @@ def run_subexperiments() -> None:
 # Services ranking (and its rows would collide on factor name with the software
 # copies).
 # --------------------------------------------------------------------------- #
-_SOFTWARE_SUBEXPERIMENTS = ["Standard", "RD", "Rev & Cost", "Growth",
+_SOFTWARE_SUBEXPERIMENTS = ["Standard", "RD", "Rev & Cost",
                             "Stability", "Skew"]
 
 # Sources contributing to the cross-experiment ranking, each a
@@ -401,33 +355,7 @@ FACTOR_DOC: dict[str, dict[str, str]] = {
         "intuition": "The single most-watched software KPI, kept as the conventional "
             "baseline; expected to be largely priced within the industry.",
     },
-    # --- Growth: margin-trajectory factor (growth_factors.py) ---
-    "gross_margin_expansion": {
-        "definition": "Year-over-year change in gross margin: gm_t - gm_{t-12m}, with "
-            "gm = gross_income_ltm / sales_ltm.",
-        "intuition": "Margin trajectory ('is the business getting better?') rather "
-            "than level ('is it a high-margin business?').  A widening margin signals "
-            "strengthening pricing power or improving mix -- a fresher, "
-            "less-arbitraged fundamental-momentum signal than the static level.",
-    },
-    # --- Stability: second moments of earnings (stability_factors.py) ---
-    "earning_stability": {
-        "definition": "Negative trailing-36m robust coefficient of variation "
-            "(std / |mean|) of diluted EPS (earnings_ltm / diluted_shares).",
-        "intuition": "Stable, predictable earnings are a recognised quality dimension "
-            "(Dichev & Tang 2009); low-volatility earners enjoy a lower cost of "
-            "capital and outperform on a risk-adjusted basis.",
-    },
-    "rd_earning_stability": {
-        "definition": "Negative trailing-12m coefficient of variation of EPS / "
-            "avg_rd_intensity, where avg_rd_intensity is the trailing-36m average "
-            "R&D intensity (rd_ltm / sales_ltm).",
-        "intuition": "The consistency of earnings delivered per unit of the firm's "
-            "baseline reinvestment.  Normalising EPS by a slow-moving R&D-intensity "
-            "base puts high- and low-R&D firms on a comparable footing; steady "
-            "earnings-per-reinvestment signals discipline, wild swings signal "
-            "instability.",
-    },
+    # --- Stability: second moments of quality (stability_factors.py) ---
     "cashflow_stability": {
         "definition": "Negative trailing-36m coefficient of variation of the "
             "operating-cash-flow margin (operating_cf_ltm / sales_ltm).",
@@ -449,6 +377,35 @@ FACTOR_DOC: dict[str, dict[str, str]] = {
         "intuition": "The consistency of the profitability engine itself -- a "
             "firm that earns its gross profits steadily has a more durable "
             "franchise than one whose profitability swings.",
+    },
+    "tangible_capital_stability": {
+        "definition": "Negative trailing-12m coefficient of variation of the "
+            "tangible-capital ratio net PPE / invested_capital.",
+        "intuition": "How steadily the firm's capital structure leans on physical, "
+            "tangible assets.  A settled asset base scores high; one being rebuilt "
+            "through acquisitions, divestitures or capex bursts scores low.",
+    },
+    "operating_income_growth_stability": {
+        "definition": "Negative trailing-36m coefficient of variation of the "
+            "year-over-year change in operating income (operating_income_ltm_t - "
+            "operating_income_ltm_{t-12}).",
+        "intuition": "How steadily the earnings engine GROWS.  A consistent annual "
+            "earnings step signals a durable franchise; year-over-year swings that "
+            "lurch around signal an unpredictable one.",
+    },
+    "investing_cf_growth_stability": {
+        "definition": "Negative trailing-36m coefficient of variation of the "
+            "year-over-year change in investing cash flow, proxied by fixed capex "
+            "(capex_fix_ltm_t - capex_fix_ltm_{t-12}).",
+        "intuition": "The consistency of the firm's investment cadence -- steady, "
+            "programmatic capex growth versus lumpy, opportunistic bursts.",
+    },
+    "tangible_asset_growth_stability": {
+        "definition": "Negative trailing-36m coefficient of variation of the "
+            "year-over-year change in tangible assets (net PPE_t - net PPE_{t-12}).",
+        "intuition": "How EVENLY the tangible asset base is built up rather than its "
+            "level.  The asset-growth / investment anomaly flags erratic, spiky asset "
+            "growth as a low-return signal, so a steady builder is the long leg.",
     },
     # --- Skew: third moments / lottery demand (skew_factors.py) ---
     "return_skewness": {
@@ -607,27 +564,8 @@ def collect_top_factors(top_n: int = TOP_N) -> pd.DataFrame:
 
 
 def main() -> None:
-    print(f"=== Building software factor panel: {UNIVERSE.slug} "
-          f"(industry group: {UNIVERSE.industry_group}) ===")
-    panel = S.build(save=True, u=UNIVERSE)
-    n_months = panel["date"].nunique()
-    n_stocks = panel["stock_id"].nunique()
-    print(f"  {len(panel):,} rows | {n_stocks} stocks | {n_months} months "
-          f"({panel['date'].min():%Y-%m} .. {panel['date'].max():%Y-%m})")
-    print(f"  Factors: {', '.join(S.FACTOR_NAMES)}")
-    print(f"  Saved -> {UNIVERSE.panel_path}\n")
-
-    # Reuse the loaded panel for both analyses (avoids re-reading from disk).
-    print("=== Approach 1: quintile sorts (with average trading cost) ===")
-    quintile.run(panel=panel, u=UNIVERSE)
-
-    print("\n=== Approach 2: cross-sectional regressions ===")
-    regression.run(panel=panel, u=UNIVERSE)
-
-    print("\n=== Redundancy check: software factors vs general factors ===")
-    run_correlation_analysis()
-
-    print(f"\nDone (Standard). All outputs under {UNIVERSE.output_dir}")
+    D.run_pipeline(S, UNIVERSE, "software factor", quintile, regression,
+                   done_suffix=" (Standard)")
 
     # Run the remaining subexperiments (each in its own process, see above).
     run_subexperiments()

@@ -67,8 +67,6 @@ import pandas as pd
 import cost
 import factors as F
 
-REGRESSION_DIR = F.OUTPUT_DIR / "regression"
-QUINTILE_DIR = F.OUTPUT_DIR / "quintile"   # long-short books live alongside the sorts
 DECADE_START = pd.Timestamp("2016-01-01")  # "past decade" cut-off
 N_QUINTILES = 5
 MONTHS_PER_YEAR = 12
