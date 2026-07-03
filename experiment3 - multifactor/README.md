@@ -32,8 +32,10 @@ Five ways to combine the factors, sharing one spine (plus the redundancy tool):
 [`main.py`](main.py) orchestrates all five pipelines, each in its own
 subprocess (they share the dependency-injected Experiment 1 engine, so they must
 not share an interpreter), in dependency order: `composite` →
-`weighted_composite` → `bivariate_tertile` → `factor_momentum` →
-`portfolio_overlay`.
+`weighted_composite` → `bivariate_tertile` (twice: the default
+`return_stability × gross_profitability` pair, then
+`revenue_stability × gross_profitability`, so both books stay current) →
+`factor_momentum` → `portfolio_overlay`.
 
 The weighted variant is described under
 [Coefficient-weighted variant](#coefficient-weighted-variant-expanding-window-walk-forward--weighted_compositepy);
@@ -98,7 +100,7 @@ expanding-window walk-forward.
 ## Run
 
 ```bash
-python main.py                                               # all five pipelines, in order
+python main.py                                               # all five pipelines, in order (bivariate runs both pairs)
 
 python composite.py                                          # equal-weighted, default set (below)
 python composite.py buyback_quality gross_profitability rd_stability

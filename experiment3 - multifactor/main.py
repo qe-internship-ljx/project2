@@ -20,7 +20,9 @@ own module and already runs standalone via ``python <module>.py``:
 standalone pipeline.
 
 Like Experiment 2's ``main.py``, this adds no new analytics -- it just invokes
-each module's own ``main`` with its default factor set.  Each module wires
+each module's own ``main`` with its default factor set (plus a second
+``bivariate_tertile.py`` run for the revenue_stability x gross_profitability
+pair, so that book is refreshed alongside the default one).  Each module wires
 Experiment 1's engine into ``sys.modules`` at import time (via ``composite``),
 so to keep every run pristine and isolated -- and to match the documented
 ``python <module>.py`` standalone path -- each is run in its own subprocess.  A
@@ -48,14 +50,18 @@ import composite as C
 _THIS_DIR = Path(__file__).resolve().parent
 
 # Every runnable pipeline in dependency-agnostic logical order (each is isolated
-# in its own subprocess, so ordering is for readability, not correctness).
+# in its own subprocess, so ordering is for readability, not correctness).  Each
+# entry is the full argv after the interpreter: module path plus any CLI args.
+# ``bivariate_tertile.py`` runs twice -- its default pair, then the
+# revenue_stability pair -- so both books stay current with pipeline changes.
 # ``factor_correlation.py`` has no ``main`` and is excluded by design.
 _PIPELINES = [
-    _THIS_DIR / "composite.py",
-    _THIS_DIR / "weighted_composite.py",
-    _THIS_DIR / "bivariate_tertile.py",
-    _THIS_DIR / "factor_momentum.py",
-    _THIS_DIR / "portfolio_overlay.py",
+    [_THIS_DIR / "composite.py"],
+    [_THIS_DIR / "weighted_composite.py"],
+    [_THIS_DIR / "bivariate_tertile.py"],
+    [_THIS_DIR / "bivariate_tertile.py", "revenue_stability", "gross_profitability"],
+    [_THIS_DIR / "factor_momentum.py"],
+    [_THIS_DIR / "portfolio_overlay.py"],
 ]
 
 
@@ -87,12 +93,13 @@ def main() -> None:
     render_top5_table()
 
     failed: list[str] = []
-    for path in _PIPELINES:
-        print(f"\n{'#' * 72}\n# Experiment 3 pipeline: {path.name}\n{'#' * 72}")
-        result = subprocess.run([sys.executable, path.name], cwd=path.parent)
+    for path, *args in _PIPELINES:
+        label = " ".join([path.name, *args])
+        print(f"\n{'#' * 72}\n# Experiment 3 pipeline: {label}\n{'#' * 72}")
+        result = subprocess.run([sys.executable, path.name, *args], cwd=path.parent)
         if result.returncode != 0:
-            failed.append(path.name)
-            print(f"!! {path.name} exited with code {result.returncode}")
+            failed.append(label)
+            print(f"!! {label} exited with code {result.returncode}")
 
     if failed:
         print(f"\n{len(failed)} pipeline(s) FAILED: {', '.join(failed)}")

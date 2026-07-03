@@ -104,7 +104,11 @@ Experiments 2 and 3. The book also gets a **β-neutral Sharpe**: it is hedged wi
 a `−β·industry` overlay, but `β` is re-estimated **every month on an expanding
 window of only the data available up to that month** (a walk-forward hedge, free
 of look-ahead) rather than one full-sample slope — so the Sharpe reflects a hedge
-an investor could actually have put on. The industry `β` itself is no longer
+an investor could actually have put on. Because a stable monthly β needs a few
+years of history, the hedge has a **36-month warm-up** (`HEDGE_MIN_MONTHS`): the
+first 3 years — too little prior data for a reliable slope — carry no β and are
+dropped from the β-neutral series, which therefore starts one estimation window in
+from sample start. The industry `β` itself is no longer
 reported as a column. All of these are estimated over the full sample and,
 separately, the **past decade (2016+)** — where the 2016+ β-neutral Sharpe simply
 windows the same walk-forward hedged series, so its monthly betas still use all

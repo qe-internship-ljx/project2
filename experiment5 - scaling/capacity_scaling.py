@@ -407,7 +407,7 @@ def corner_ownership(legs: pd.DataFrame, leg_capital: float | None = None) -> pd
     cap (``mcap``).  Returns the per-month max across both corners -- the most
     concentrated single position held -- the sqrt-cap analog of
     ``bivariate_tertile._intersection_ownership``'s equal-weighted share."""
-    leg_capital = _bivariate.LEG_CAPITAL if leg_capital is None else leg_capital
+    leg_capital = _C.LEG_CAPITAL if leg_capital is None else leg_capital
     share = (leg_capital * legs["w"]) / legs["mcap"]
     return share.groupby(legs["date"]).max().sort_index()
 
@@ -470,7 +470,7 @@ def run_bivariate(factor_names: list[str] | None = None,
         benchmark_metrics.append((f"α vs {f} book (monthly)", f"alpha_vs_{f}", "pct", False))
         benchmark_metrics.append((f"    α t-stat vs {f}", f"alpha_tstat_vs_{f}", "num", True))
     extra_metrics = benchmark_metrics + [
-        (f"Largest single-name ownership (${_bivariate.PORTFOLIO_CAPITAL / 1e6:.0f}M total)",
+        (f"Largest single-name ownership (${_C.PORTFOLIO_CAPITAL / 1e6:.0f}M total)",
          "max_ownership", "pct", False)]
 
     n_stocks = frame["stock_id"].nunique()

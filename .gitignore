@@ -15,3 +15,6 @@ software_ls_project_plan.tex
 # PDF and HTML files
 *.pdf
 *.html
+
+# Blog-style experiment reports (generated, not tracked)
+reports/
