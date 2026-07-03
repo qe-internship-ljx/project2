@@ -124,7 +124,8 @@ exposure_correlation.csv    pairwise correlation of the oriented constituent z-s
 quintile_returns.csv        months × {Q1..Q5, Q5−Q1}, mean next-period return
 quintile_cumulative.png     the five buckets as cumulative growth of $1 (log scale)
 long_short.png              the Q5−Q1 book's cumulative growth of $1
-performance.png             mean / t / Sharpe / industry-neutral alpha (full + 2016+)
+performance.png             mean / t / Sharpe / industry-neutral alpha / largest
+                            single-name ownership for a $100M book (full + 2016+)
 ```
 
 ## Headline result — `buyback_quality + gross_profitability + rd_stability`
@@ -240,9 +241,10 @@ files are written — the sort is an internal step.
 ## Other combinations — `bivariate_tertile.py`, `factor_momentum.py`, `portfolio_overlay.py`
 
 All three reuse `composite.py`'s spine (`resolve_factors` / `load_exposures`,
-`industry_return`, `book_stats`, `attach_net_cost_sharpe`, `render_performance`),
-so "alpha", the cost model and the net-of-cost Sharpe are defined identically to
-every other book in the project.
+`industry_return`, `book_stats`, `attach_net_cost_sharpe`, `leg_ownership` /
+`attach_ownership`, `render_performance`), so "alpha", the cost model, the
+net-of-cost Sharpe and the largest single-name ownership (for a $100M book) are
+defined identically to every other book in the project.
 
 **`bivariate_tertile.py` — independent double sort.** Every month the
 cross-section is split into three equal-count tertiles on each of two factors

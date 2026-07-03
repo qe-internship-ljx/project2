@@ -42,7 +42,8 @@ never netted from the gross alpha.
 Outputs (``output/portfolio_overlay/``)
 ---------------------------------------
     performance.png     the joint book's mean / t / Sharpe / industry-neutral
-                        alpha / net-of-cost Sharpe / avg cost, full sample and 2016+
+                        alpha / net-of-cost Sharpe / largest single-name ownership
+                        for a $100M book / avg cost, full sample and 2016+
 
 Run standalone::
 
@@ -73,17 +74,18 @@ def overlay_return(spreads: pd.DataFrame) -> pd.Series:
     return spreads.dropna().mean(axis=1).rename("overlay")
 
 
-def overlay_cost(factor_names: list[str], months: pd.Index) -> pd.Series:
+def overlay_legs(factor_names: list[str], months: pd.Index) -> pd.DataFrame:
     """
-    Monthly turnover cost of holding all candidate books jointly, indexed by
-    formation month and restricted to the ``months`` the overlay is booked.
+    The joint book's cross-book **netted** leg membership (``date, stock_id, leg,
+    w``), restricted to the ``months`` the overlay is booked.
 
     Each book contributes its equal-weighted Q5/Q1 leg membership scaled by the
     ``1/n`` capital split, signed by side; the per-name weights are then netted
-    across books before ``cost.turnover_cost`` charges the weight actually
-    traded.  Splitting the netted weight back into a positive long and short leg
-    keeps the charge exact even when a name flips side month-over-month (the
-    two legs' one-way charges sum to the full crossing trade).
+    across books, so a name long in one book and short in another carries only its
+    residual position.  The netted weight is split back into a positive long and
+    short leg (side from its sign, ``w`` its magnitude).  Because each side's
+    weights sum to ~1, ``w`` is a fraction of a leg's capital -- the convention the
+    cost model and :func:`composite.leg_ownership` both consume.
     """
     resolved = C.resolve_factors(factor_names)
     pieces = []
@@ -97,8 +99,17 @@ def overlay_cost(factor_names: list[str], months: pd.Index) -> pd.Series:
     net = net[net["w"] != 0.0]
     net["leg"] = np.where(net["w"] > 0, "long", "short")
     net["w"] = net["w"].abs()
+    return net
+
+
+def overlay_cost(legs: pd.DataFrame, months: pd.Index) -> pd.Series:
+    """Monthly turnover cost of holding all candidate books jointly, from the netted
+    :func:`overlay_legs` membership: ``cost.turnover_cost`` charges the weight
+    actually traded.  Splitting the netted weight back into a positive long and short
+    leg keeps the charge exact even when a name flips side month-over-month (the two
+    legs' one-way charges sum to the full crossing trade)."""
     dates = pd.Index(sorted(months), name="date")
-    return C.COST.turnover_cost(net, C.cost_panel(), dates)
+    return C.COST.turnover_cost(legs, C.cost_panel(), dates)
 
 
 # --------------------------------------------------------------------------- #
@@ -128,11 +139,18 @@ def run(csv_path: Path = FM.TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> dict
 
     # Netted turnover cost of the joint book (reported, not netted from the gross
     # alpha) plus the cost-incorporated Sharpe from the same series.
-    cost_series = overlay_cost(factor_names, spread.index)
+    legs = overlay_legs(factor_names, spread.index)
+    cost_series = overlay_cost(legs, spread.index)
     full["avg_cost"] = C.window_cost(cost_series)
     decade["avg_cost"] = C.window_cost(cost_series, start=DECADE_START)
     C.attach_net_cost_sharpe(full, spread, cost_series, industry)
     C.attach_net_cost_sharpe(decade, spread, cost_series, industry, start=DECADE_START)
+
+    # Largest single-name ownership for a $100M dollar-neutral book (worst case per
+    # window), from the same cross-book netted leg weights the cost uses.
+    ownership = C.leg_ownership(legs)
+    C.attach_ownership(full, ownership)
+    C.attach_ownership(decade, ownership, start=DECADE_START)
 
     # --- Persist output ------------------------------------------------------ #
     C.render_performance(
@@ -143,7 +161,8 @@ def run(csv_path: Path = FM.TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> dict
         "alpha from regressing the book on the market-cap-weighted industry return; "
         "cost charged on the cross-book netted weights.   "
         "Shading: |t| >= 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png")
+        out_dir / "performance.png",
+        extra_metrics=[C.ownership_metric()])
 
     # --- Console summary (ASCII only -- Windows cp1252 stdout) --------------- #
     print(f"  overlay: mean {full['mean_monthly']:+.4%}/mo "

@@ -114,13 +114,9 @@ DECADE_START = C.DECADE_START                # "past decade" cut-off (2016+), pr
 # Experiment 1, revenue_stability in Experiment 2's Rev & Cost library).
 BENCHMARK_FACTORS = ["gross_profitability", "revenue_stability"]
 
-# Capital assumption for the ownership/capacity diagnostic.  The book is
-# dollar-neutral, so a $100M *total* portfolio funds $50M in each leg; each corner
-# leg is equal-weighted, so a name's dollar position is LEG_CAPITAL / (leg
-# headcount) and the "largest single-name ownership" row reports the biggest such
-# position as a share of that name's own market cap.
-PORTFOLIO_CAPITAL = 100_000_000.0            # $100M total (dollar-neutral book)
-LEG_CAPITAL = PORTFOLIO_CAPITAL / 2          # $50M invested in each leg
+# The capital assumption behind the largest-single-name ownership row lives in
+# composite.py (``PORTFOLIO_CAPITAL`` / ``LEG_CAPITAL``); the ownership itself is
+# computed by ``composite.leg_ownership`` from each book's leg membership.
 
 
 # --------------------------------------------------------------------------- #
@@ -184,44 +180,39 @@ def _intersection_book(frame: pd.DataFrame, col_a: str, col_b: str,
     return book.dropna(subset=["long_short"]).sort_index()
 
 
-def _intersection_cost(frame: pd.DataFrame, col_a: str, col_b: str,
-                       top, bottom) -> pd.Series:
-    """
-    Monthly turnover cost of an intersection double-sort book, using the project's
-    one cost model.  The two legs are the corner cells (``top`` bucket of both =
-    long, ``bottom`` bucket of both = short), each equal-weighted; the per-leg
-    turnover summation is ``cost.turnover_cost`` (the routine the quintile books use).
-    """
+def _intersection_legs(frame: pd.DataFrame, col_a: str, col_b: str,
+                       top, bottom) -> pd.DataFrame:
+    """Equal-weighted corner-cell leg membership (``date, stock_id, leg, w``) of an
+    intersection double-sort book: ``top`` bucket of both factors = long, ``bottom``
+    bucket of both = short.  Shared by the cost and ownership diagnostics so both
+    size exactly the names the book trades."""
     long_cell = frame.loc[(frame[col_a] == top) & (frame[col_b] == top),
                           ["date", "stock_id"]].assign(leg="long")
     short_cell = frame.loc[(frame[col_a] == bottom) & (frame[col_b] == bottom),
                            ["date", "stock_id"]].assign(leg="short")
-    legs = C.COST.equal_weight_legs(pd.concat([long_cell, short_cell], ignore_index=True))
+    return C.COST.equal_weight_legs(pd.concat([long_cell, short_cell], ignore_index=True))
+
+
+def _intersection_cost(frame: pd.DataFrame, col_a: str, col_b: str,
+                       top, bottom) -> pd.Series:
+    """
+    Monthly turnover cost of an intersection double-sort book, using the project's
+    one cost model.  The two legs are the corner cells (:func:`_intersection_legs`);
+    the per-leg turnover summation is ``cost.turnover_cost`` (the routine the
+    quintile books use).
+    """
+    legs = _intersection_legs(frame, col_a, col_b, top, bottom)
     dates = pd.Index(sorted(frame["date"].unique()), name="date")
     return C.COST.turnover_cost(legs, C.cost_panel(), dates)
 
 
 def _intersection_ownership(frame: pd.DataFrame, col_a: str, col_b: str,
                             top, bottom) -> pd.Series:
-    """
-    Monthly largest single-name ownership share of an intersection double-sort book.
-
-    Each corner leg (``top`` bucket of both = long, ``bottom`` bucket of both =
-    short) is equal-weighted with :data:`LEG_CAPITAL`, so a name's dollar position
-    is ``LEG_CAPITAL / (leg headcount)`` and its ownership share is that position
-    over the name's formation market cap (``mcap``).  Returns, per month, the max
-    such share across both corner legs -- the most concentrated single position we
-    would hold.  Windowed with ``max`` (not ``mean``) since it is a worst-case cap.
-    """
-    def _leg_share(cell: pd.DataFrame) -> pd.Series:
-        n = cell.groupby("date")["stock_id"].transform("size")
-        share = (LEG_CAPITAL / n) / cell["mcap"]
-        return share.groupby(cell["date"]).max()
-
-    long_cell = frame[(frame[col_a] == top) & (frame[col_b] == top)]
-    short_cell = frame[(frame[col_a] == bottom) & (frame[col_b] == bottom)]
-    return pd.concat([_leg_share(long_cell), _leg_share(short_cell)],
-                     axis=1).max(axis=1).sort_index()
+    """Monthly largest single-name ownership share of an intersection double-sort
+    book -- the corner-cell leg membership (:func:`_intersection_legs`) priced by
+    the shared :func:`composite.leg_ownership` (dollar position ``LEG_CAPITAL / (leg
+    headcount)`` over each name's formation market cap, per-month max across legs)."""
+    return C.leg_ownership(_intersection_legs(frame, col_a, col_b, top, bottom))
 
 
 def bivariate_book(frame: pd.DataFrame) -> pd.DataFrame:
@@ -316,15 +307,6 @@ def benchmark_alphas(spread: pd.Series, benchmarks: dict[str, pd.Series],
     return out
 
 
-def _window_max(s: pd.Series, start: pd.Timestamp | None = None) -> float:
-    """Worst-case (max) value of a per-month series over an optional ``[start, )``
-    window -- the ownership counterpart of :func:`composite.window_cost`'s mean."""
-    s = s.dropna()
-    if start is not None:
-        s = s[s.index >= start]
-    return float(s.max()) if len(s) else float("nan")
-
-
 def evaluate_book(spread: pd.Series, cost_series: pd.Series, industry: pd.Series,
                   benchmarks: dict[str, pd.Series],
                   ownership: pd.Series) -> tuple[list, dict, dict]:
@@ -333,7 +315,7 @@ def evaluate_book(spread: pd.Series, cost_series: pd.Series, industry: pd.Series
 
     Each window is a :func:`composite.book_stats` dict augmented with the average
     turnover cost over that window, the largest single-name ownership share within
-    it (:func:`_intersection_ownership`, windowed with ``max``), and the alpha the
+    it (:func:`composite.attach_ownership`, windowed with ``max``), and the alpha the
     book earns *above* each standalone benchmark book (:func:`benchmark_alphas`).
     Shared by both the tertile-corner and the half-intersection selection rules so
     they are measured identically.  Returns ``(windows, full_stats, decade_stats)``.
@@ -345,8 +327,8 @@ def evaluate_book(spread: pd.Series, cost_series: pd.Series, industry: pd.Series
     decade["avg_cost"] = C.window_cost(cost_series, start=DECADE_START)
     C.attach_net_cost_sharpe(full, spread, cost_series, industry)
     C.attach_net_cost_sharpe(decade, spread, cost_series, industry, start=DECADE_START)
-    full["max_ownership"] = _window_max(ownership)
-    decade["max_ownership"] = _window_max(ownership, start=DECADE_START)
+    C.attach_ownership(full, ownership)
+    C.attach_ownership(decade, ownership, start=DECADE_START)
     full.update(benchmark_alphas(spread, benchmarks))
     decade.update(benchmark_alphas(spread, benchmarks, start=DECADE_START))
     return windows, full, decade
@@ -478,9 +460,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     frame, oriented = double_sorted(resolved)
     industry = C.industry_return()
     benchmarks = {f: C.factor_long_short(f) for f in BENCHMARK_FACTORS}
-    extra_metrics = _benchmark_extra_metrics() + [
-        (f"Largest single-name ownership (${PORTFOLIO_CAPITAL / 1e6:.0f}M total)",
-         "max_ownership", "pct", False)]
+    extra_metrics = _benchmark_extra_metrics() + [C.ownership_metric()]
 
     # 2a. Tertile-corner rule: long top tertile of both / short bottom of both.
     book = bivariate_book(frame)

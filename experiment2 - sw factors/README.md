@@ -41,6 +41,8 @@ main.py                # driver: wires sw_factors -> 'factors', runs quintile + 
                        #   then the software subexperiments, then the top-factor collection
 driver_utils.py        # shared driver boilerplate (engine wiring, pipeline, redundancy step)
 tertile.py             # re-evaluates EVERY factor with tertile (T3-T1) books instead of quintiles
+quarter_position.py    # re-evaluates EVERY factor with QUINTILE and TERTILE books repositioned QUARTERLY
+                       #   (form new buckets only end of Feb/May/Aug/Nov, hold 3 months) -> lower turnover cost
 Standard/              # established §2.2 factors (outputs of sw_factors.py)
     factor_panel.csv
     quintile/   <factor>/{quintile_returns.csv, quintile_cumulative.png, long_short.png}
@@ -91,6 +93,9 @@ python main.py collect    # only (re)collect the top factors from existing CSVs
 python Cross_val/main_crossval.py   # run manually AFTER the collection (reads top_factors.csv)
 python sw_factors.py      # rebuild the Standard factor panel only
 python tertile.py         # tertile re-evaluation -> top_factors/tertile_long_short_market_alpha.png
+python quarter_position.py  # quarterly-repositioned re-evaluation (end Feb/May/Aug/Nov), quintile + tertile
+                            #   -> top_factors/quarter_position_long_short_market_alpha.png         (quintile)
+                            #   -> top_factors/quarter_position_tertile_long_short_market_alpha.png (tertile)
 ```
 
 ## Factors
@@ -138,6 +143,14 @@ on **turnover, not holdings** — `kappa` only when a position is actually trade
 never pays more than one round-trip across its whole holding period. The book's
 **average monthly turnover cost (pp)** is reported as an extra column in the
 `long_short_market_alpha` table.
+
+Because cost is charged only on the weight actually traded, **rebalancing less
+often trades less**: `quarter_position.py` re-forms each factor's book (quintile
+*and* tertile) only at the end of Feb/May/Aug/Nov and holds that membership fixed
+for the intervening months, so `cost.turnover_cost` charges a round-trip only at
+the reposition dates and ~0 in between — the lower turnover falls straight out of
+the same cost machinery, at the price of letting the signal stale between
+reposition dates.
 
 ## Headline results (1998–2026, 336 months)
 

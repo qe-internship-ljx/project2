@@ -55,6 +55,7 @@ Outputs (``output/weighted/<slug>/``)
     tstat_path.{csv,png}     each factor's expanding-window clustered t-stat over time
     long_short.png           the walk-forward Q5-Q1 book's growth of $1
     performance.png          the walk-forward Q5-Q1 book's performance summary
+                             (incl. largest single-name ownership for a $100M book)
 
 Run standalone::
 
@@ -308,10 +309,13 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     oos_start, oos_end = traded.index.min(), traded.index.max()
     win_label = f"Walk-forward OOS ({oos_start:%Y}+)"
     stats = C.book_stats(spread, industry)
-    cost_series = C.COST.long_short_cost(panel, C.COMPOSITE_FACTOR, C.cost_panel(),
-                                         n_quintiles=C.N_QUINTILES)
+    legs = C.quintile_legs(panel)
+    cost_series = C.COST.turnover_cost(legs, C.cost_panel())
     stats["avg_cost"] = C.window_cost(cost_series)
     C.attach_net_cost_sharpe(stats, spread, cost_series, industry)
+    # Largest single-name ownership for a $100M dollar-neutral book (worst case over
+    # the walk-forward window), from the same Q5/Q1 leg membership the cost uses.
+    C.attach_ownership(stats, C.leg_ownership(legs))
     windows = [(win_label, stats)]
 
     # --- Persist outputs --------------------------------------------------- #
@@ -340,7 +344,8 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
         f"factors: {' + '.join(factor_names)}   |   "
         "every traded month is out-of-sample   |   "
         "Shading: |t| ≥ 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png")
+        out_dir / "performance.png",
+        extra_metrics=[C.ownership_metric()])
 
     # --- Console summary --------------------------------------------------- #
     print("Full-sample premia (reference t-stats over the entire period):")

@@ -70,12 +70,14 @@ Outputs (``output/factor_momentum/``)
     factor_momentum_cumulative.png   growth of $1 in the rotation
     selection_timeline.png           which factor is held each month + how often
     performance.png                  rotation performance (full / 2016+), with the alpha
+                                     and largest single-name ownership for a $100M book
     factor_momentum_returns.csv      monthly chosen factor + rotation/constituent returns
     selection_counts.csv             how many months each factor was selected
 ``bivariate/`` -- the 3-monthly-reselected double sort of the trailing-12m top two:
     long_short.png                   growth of $1 in the rotating double-sort book
     grid_mean_return.png             3x3 tertile grid, cell returns averaged over all months
     performance.png                  book performance (full / 2016+), with the alpha
+                                     and largest single-name ownership for a $100M book
     bivariate_returns.csv            monthly chosen pair + long/short/spread + leg sizes
     pair_counts.csv                  how many months each pair was selected
 
@@ -251,21 +253,29 @@ def _leg_membership(resolved_row) -> pd.DataFrame:
     return mem.drop(columns="quintile")
 
 
-def rotation_cost(factor_names: list[str], chosen: pd.Series) -> pd.Series:
-    """
-    Monthly turnover cost of the rotation, indexed by formation month.  Each month
-    the book is the *chosen* factor's full Q5/Q1 leg membership; ``cost.turnover_cost``
-    then charges the genuine trading -- a near-full liquidation/re-establishment
-    whenever the rotation switches factor, only membership drift when it holds the
-    same factor (a name that happens to sit on the same leg of both factors is not
-    traded).  Reported alongside performance, never netted from the gross alpha.
-    """
+def rotation_legs(factor_names: list[str], chosen: pd.Series) -> pd.DataFrame:
+    """Equal-weighted Q5/Q1 leg membership (``date, stock_id, leg, w``) the rotation
+    actually holds: each month the *chosen* factor's full bullish-oriented Q5/Q1
+    book.  Shared by the cost and ownership diagnostics so both price exactly the
+    names the rotation trades."""
     resolved = C.resolve_factors(factor_names)
     membership = {r.factor: _leg_membership(r) for r in resolved.itertuples()}
     held = [membership[f][membership[f]["date"] == t] for t, f in chosen.items()]
-    legs = C.COST.equal_weight_legs(pd.concat(held, ignore_index=True))
+    return C.COST.equal_weight_legs(pd.concat(held, ignore_index=True))
+
+
+def rotation_cost(factor_names: list[str], chosen: pd.Series) -> pd.Series:
+    """
+    Monthly turnover cost of the rotation, indexed by formation month.  Each month
+    the book is the *chosen* factor's full Q5/Q1 leg membership (:func:`rotation_legs`);
+    ``cost.turnover_cost`` then charges the genuine trading -- a near-full
+    liquidation/re-establishment whenever the rotation switches factor, only
+    membership drift when it holds the same factor (a name that happens to sit on the
+    same leg of both factors is not traded).  Reported alongside performance, never
+    netted from the gross alpha.
+    """
     dates = pd.Index(sorted(chosen.index), name="date")
-    return C.COST.turnover_cost(legs, C.cost_panel(), dates)
+    return C.COST.turnover_cost(rotation_legs(factor_names, chosen), C.cost_panel(), dates)
 
 
 # --------------------------------------------------------------------------- #
@@ -354,11 +364,19 @@ def run_univariate(top: pd.DataFrame, spreads: pd.DataFrame,
 
     # Average monthly turnover cost of the rotation (reported, not netted) plus the
     # cost-incorporated Sharpe (raw + β-neutral) from the same cost series.
-    cost_series = rotation_cost(factor_names, chosen)
+    legs = rotation_legs(factor_names, chosen)
+    cost_series = C.COST.turnover_cost(legs, C.cost_panel(),
+                                       pd.Index(sorted(chosen.index), name="date"))
     full["avg_cost"] = C.window_cost(cost_series)
     decade["avg_cost"] = C.window_cost(cost_series, start=DECADE_START)
     C.attach_net_cost_sharpe(full, rotated, cost_series, industry)
     C.attach_net_cost_sharpe(decade, rotated, cost_series, industry, start=DECADE_START)
+
+    # Largest single-name ownership for a $100M dollar-neutral book (worst case per
+    # window), from the same chosen-factor Q5/Q1 leg membership the cost uses.
+    ownership = C.leg_ownership(legs)
+    C.attach_ownership(full, ownership)
+    C.attach_ownership(decade, ownership, start=DECADE_START)
 
     # --- Persist outputs --------------------------------------------------- #
     panel = spreads.loc[rotated.index].copy()
@@ -381,7 +399,8 @@ def run_univariate(top: pd.DataFrame, spreads: pd.DataFrame,
         f"{len(rotated)} months ({start:%Y-%m} .. {end:%Y-%m})   |   "
         "alpha from regressing the book on the market-cap-weighted industry return.   "
         "Shading: |t| >= 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png")
+        out_dir / "performance.png",
+        extra_metrics=[C.ownership_metric()])
 
     # --- Console summary (ASCII only -- Windows cp1252 stdout) ------------- #
     print(f"  rotation: mean {full['mean_monthly']:+.4%}/mo "
@@ -458,6 +477,12 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
     C.attach_net_cost_sharpe(full, spread, cost_series, industry)
     C.attach_net_cost_sharpe(decade, spread, cost_series, industry, start=DECADE_START)
 
+    # Largest single-name ownership for a $100M dollar-neutral book (worst case per
+    # window), from the rotating double sort's corner-cell legs.
+    ownership = BT.bivariate_ownership(frame)
+    C.attach_ownership(full, ownership)
+    C.attach_ownership(decade, ownership, start=DECADE_START)
+
     # --- Persist outputs --------------------------------------------------- #
     held = pairs.loc[book.index]                     # pair traded each booked month
     out = book.copy()
@@ -480,7 +505,8 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
         f"{len(spread)} months ({start:%Y-%m} .. {end:%Y-%m})   |   "
         "industry-neutral alpha from the market-cap-weighted industry return.   "
         "Shading: |t| >= 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png")
+        out_dir / "performance.png",
+        extra_metrics=[C.ownership_metric()])
 
     # --- Console summary (ASCII only -- Windows cp1252 stdout) ------------- #
     print(f"  long/short: {full['mean_monthly']:+.4%}/mo "

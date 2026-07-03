@@ -52,7 +52,8 @@ reporting; every input it consumes was produced upstream.
 Outputs (``output/composite/``)
 -------------------------------
     quintile_cumulative.png     the five buckets as cumulative growth of $1 (log scale)
-    performance.png             the L/S book's mean / t / Sharpe / industry-neutral alpha
+    performance.png             the L/S book's mean / t / Sharpe / industry-neutral alpha /
+                                largest single-name ownership for a $100M book / avg cost
 
 Run standalone::
 
@@ -124,6 +125,14 @@ COMPOSITE_FACTOR = "composite"          # synthetic factor name fed to the reuse
 N_QUINTILES = 5
 MONTHS_PER_YEAR = 12
 DECADE_START = pd.Timestamp("2016-01-01")   # "past decade" cut-off (project convention)
+
+# Capital assumption for the largest-single-name ownership / capacity diagnostic
+# reported on every Experiment 3 book.  Each book is dollar-neutral, so a $100M
+# *total* portfolio funds $50M in each leg; a name's dollar position is
+# ``LEG_CAPITAL * (its weight within the leg)`` and its ownership share is that over
+# the name's own formation market cap.
+PORTFOLIO_CAPITAL = 100_000_000.0           # $100M total (dollar-neutral book)
+LEG_CAPITAL = PORTFOLIO_CAPITAL / 2         # $50M invested in each leg
 
 
 # --------------------------------------------------------------------------- #
@@ -399,6 +408,73 @@ def window_cost(cost_series: pd.Series,
     return float(s.mean()) if len(s) else float("nan")
 
 
+# --------------------------------------------------------------------------- #
+# Largest single-name ownership -- shared capacity diagnostic
+#
+# The one reusable ownership computation every Experiment 3 book reports.  A book
+# is described to the cost model as a tidy ``date, stock_id, leg, w`` frame (``w``
+# = a name's weight within its leg that month); the same frame prices the biggest
+# single position we would hold.  ``quintile_legs`` builds that frame for the Q5/Q1
+# quintile books; the tertile double-sort and the netted overlay build their own,
+# then all feed :func:`leg_ownership`.
+# --------------------------------------------------------------------------- #
+def quintile_legs(panel: pd.DataFrame, factor: str = COMPOSITE_FACTOR,
+                  n_quintiles: int = N_QUINTILES) -> pd.DataFrame:
+    """Equal-weighted top (long) / bottom (short) quintile leg membership of a
+    scored ``panel`` as a ``date, stock_id, leg, w`` frame -- the *same* monthly
+    quintile membership :func:`cost.long_short_cost` charges, reused here so the
+    ownership diagnostic sizes exactly the names the book trades."""
+    sub = F.prepare_slice(panel, factor, n_quintiles)
+    legs = sub.loc[sub["quintile"].isin([1.0, float(n_quintiles)]),
+                   ["date", "stock_id", "quintile"]].rename(columns={"quintile": "leg"})
+    return COST.equal_weight_legs(legs)
+
+
+def leg_ownership(legs: pd.DataFrame) -> pd.Series:
+    """
+    Monthly largest single-name ownership share of a weighted long/short book.
+
+    ``legs`` is a tidy ``date, stock_id, leg, w`` frame -- the same shape the cost
+    model consumes -- where ``w`` is a name's weight within its leg that month.
+    Each leg is funded with :data:`LEG_CAPITAL`, so a name's dollar position is
+    ``LEG_CAPITAL * w`` and its ownership share is that over the name's formation
+    market cap (:func:`market_cap_panel`).  Returns, per month, the max such share
+    across the book -- the most concentrated single position we would hold.
+    """
+    df = legs.merge(market_cap_panel(), on=["date", "stock_id"], how="left")
+    share = LEG_CAPITAL * df["w"].abs() / df["mcap"]
+    return share.groupby(df["date"]).max().sort_index()
+
+
+def window_max(series: pd.Series, start: pd.Timestamp | None = None,
+               end: pd.Timestamp | None = None) -> float:
+    """Worst-case (max) value of a per-month series over an optional ``[start, end]``
+    window -- the ownership counterpart of :func:`window_cost`'s mean."""
+    s = series.dropna()
+    if start is not None:
+        s = s[s.index >= start]
+    if end is not None:
+        s = s[s.index <= end]
+    return float(s.max()) if len(s) else float("nan")
+
+
+def attach_ownership(stats: dict, ownership: pd.Series,
+                     start: pd.Timestamp | None = None,
+                     end: pd.Timestamp | None = None) -> dict:
+    """Add the largest single-name ownership over the window (``max_ownership``,
+    :func:`window_max`) to a :func:`book_stats` dict, in place, so
+    :func:`render_performance` can show it via :func:`ownership_metric`."""
+    stats["max_ownership"] = window_max(ownership, start, end)
+    return stats
+
+
+def ownership_metric() -> tuple[str, str, str, bool]:
+    """The :func:`render_performance` ``extra_metrics`` row for the largest
+    single-name ownership share (populated by :func:`attach_ownership`)."""
+    return (f"Largest single-name ownership (${PORTFOLIO_CAPITAL / 1e6:.0f}M total)",
+            "max_ownership", "pct", False)
+
+
 def book_stats(spread: pd.Series, industry: pd.Series,
                start: pd.Timestamp | None = None,
                end: pd.Timestamp | None = None) -> dict:
@@ -652,12 +728,18 @@ def run(out_root: Path = OUTPUT_DIR) -> dict:
 
     # Average monthly turnover cost of the Q5-Q1 book (reported, not netted) plus
     # the cost-incorporated Sharpe (raw + β-neutral) derived from the same series.
-    cost_series = COST.long_short_cost(panel, COMPOSITE_FACTOR, cost_panel(),
-                                       n_quintiles=N_QUINTILES)
+    legs = quintile_legs(panel)
+    cost_series = COST.turnover_cost(legs, cost_panel())
     full["avg_cost"] = window_cost(cost_series)
     decade["avg_cost"] = window_cost(cost_series, start=DECADE_START)
     attach_net_cost_sharpe(full, spread, cost_series, industry)
     attach_net_cost_sharpe(decade, spread, cost_series, industry, start=DECADE_START)
+
+    # Largest single-name ownership for a $100M dollar-neutral book (worst-case per
+    # window), sized from the same Q5/Q1 leg membership the cost uses.
+    ownership = leg_ownership(legs)
+    attach_ownership(full, ownership)
+    attach_ownership(decade, ownership, start=DECADE_START)
     meta = {"n_stocks": composite["stock_id"].nunique(),
             "n_months": int(full["n_months"]),
             "start": composite["date"].min(), "end": composite["date"].max()}
@@ -670,7 +752,8 @@ def run(out_root: Path = OUTPUT_DIR) -> dict:
         f"{meta['n_months']} months ({meta['start']:%Y-%m} .. {meta['end']:%Y-%m})   |   "
         "α from regressing the book on the market-cap-weighted industry return.   "
         "Shading: |t| ≥ 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png")
+        out_dir / "performance.png",
+        extra_metrics=[ownership_metric()])
 
     # --- Console summary --------------------------------------------------- #
     qmeans = {q: wide[q].mean() for q in QCOLS}
