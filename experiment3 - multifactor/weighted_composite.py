@@ -48,14 +48,15 @@ benchmark and the expanding-window walk-forward.
 
 Outputs (``output/weighted/<slug>/``)
 -------------------------------------
-    coefficients.{csv,png}   full-sample premia + t-stats over the *entire* period
-                             (the reference whole-period regression; the traded
-                             strategy uses the expanding-window weights below)
-    beta_path.{csv,png}      each factor's expanding-window weight b_f(t) over time
-    tstat_path.{csv,png}     each factor's expanding-window clustered t-stat over time
+    beta_path.csv            each factor's expanding-window weight b_f(t) over time
+    tstat_path.csv           each factor's expanding-window clustered t-stat over time
+    beta_path.png                both paths in one stacked figure -- weights on top,
+                             clustered t-stats (with ±1.65/±2.0 bands) below
     long_short.png           the walk-forward Q5-Q1 book's growth of $1
     performance.png          the walk-forward Q5-Q1 book's performance summary
-                             (incl. largest single-name ownership for a $100M book)
+                             (incl. the alpha earned above each constituent's
+                             standalone factor book + largest single-name ownership
+                             for a $100M book)
 
 Run standalone::
 
@@ -74,6 +75,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import composite as C
+import bivariate_tertile as BT         # reused benchmark-relative alpha estimator
 from composite import F, Q, R          # reused engine + analysis handles
 
 # --------------------------------------------------------------------------- #
@@ -197,73 +199,49 @@ def expanding_weights(exposures: pd.DataFrame, fit: pd.DataFrame, names: list[st
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
-def render_coefficients(coef: pd.DataFrame, resolved: pd.DataFrame, path: Path) -> None:
-    """Render the **full-sample** premia (+ t-stats over the entire period) as a
-    shaded PNG.  These are the reference whole-period slopes; the traded strategy
-    uses the expanding-window weights instead (see ``beta_path.png``)."""
-    family = resolved.set_index("factor")["family"]
-    headers = ["Term", "Family", "Coef = premium\n(ind-rel /mo per 1σ)",
-               "t (OLS)", "t (cluster)", "p (cluster)"]
-    cell_text, cell_colors = [], []
-    for _, r in coef.iterrows():
-        fam = "" if r["term"] == "intercept" else str(family.get(r["term"], ""))
-        cell_text.append([r["term"], fam, f"{r['coef']:+.4%}",
-                          f"{r['t_ols']:+.2f}", f"{r['t_cluster']:+.2f}",
-                          f"{r['p_cluster']:.3f}"])
-        cell_colors.append(["white", "white", "white",
-                            R._tstat_color(r["t_ols"]), R._tstat_color(r["t_cluster"]),
-                            "white"])
+def plot_paths(beta_path: pd.DataFrame, tstat_path: pd.DataFrame,
+               factor_names: list[str], out_path: Path) -> None:
+    """Plot both expanding-window paths in a **single** stacked figure sharing the
+    formation-month x-axis: the factor weights ``b_f(t)`` on top and their
+    clustered t-stats (with the ±1.65/±2.0 significance bands) below.  One legend
+    covers both panels since the two share the same factor colours."""
+    fig, (ax_w, ax_t) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+    for col in beta_path.columns:
+        ax_w.plot(beta_path.index, beta_path[col], label=col, linewidth=1.3)
+    for col in tstat_path.columns:
+        ax_t.plot(tstat_path.index, tstat_path[col], label=col, linewidth=1.3)
 
-    n = len(coef)
-    fig, ax = plt.subplots(figsize=(12, 0.5 * (n + 1) + 1.7))
-    ax.axis("off")
-    tbl = ax.table(cellText=cell_text, colLabels=headers, cellColours=cell_colors,
-                   colWidths=[0.20, 0.26, 0.22, 0.10, 0.12, 0.10],
-                   cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
-    tbl.auto_set_font_size(False)
-    tbl.set_fontsize(9)
-    for j in range(len(headers)):
-        tbl[0, j].set_text_props(weight="bold", color="white")
-        tbl[0, j].set_facecolor("#404040")
-    for i in range(1, n + 1):
-        tbl[i, 0].set_text_props(ha="left")
-        tbl[i, 1].set_text_props(ha="left")
+    ax_w.axhline(0.0, color="black", linewidth=0.6)
+    ax_w.set_ylabel("coefficient = weight\n(ind-rel /mo per 1σ)")
+    ax_w.set_title("weight  b_f(t)")
+    ax_w.grid(True, alpha=0.3)
+    ax_w.legend(title="Factor", ncol=min(len(beta_path.columns), 4),
+                loc="best", fontsize=8)
 
-    n_obs = int(coef["n_obs"].iloc[0])
-    n_months = int(coef["n_clusters_months"].iloc[0])
-    fig.suptitle("Experiment 3 -- full-sample factor premia (reference)\n"
-                 "normalised next return regressed on factor z-scores "
-                 "(pooled across stocks & months, entire period)", fontsize=11, y=0.99)
-    fig.text(0.5, 0.05,
-             f"full sample: {n_obs:,} stock-months over {n_months} months.   "
-             "t clustered by month.   The traded book uses the expanding-window "
-             "weights (beta_path.png), not these.   "
-             "Shading: |t| ≥ 1.65 (10%), 2.0 (5%).",
-             ha="center", fontsize=8, color="#555555")
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.80, bottom=0.10)
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
+    ax_t.axhline(0.0, color="black", linewidth=0.6)
+    for y in (-2.0, -1.65, 1.65, 2.0):
+        ax_t.axhline(y, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
+    ax_t.set_ylabel("clustered t-stat")
+    ax_t.set_title("clustered t-stat")
+    ax_t.set_xlabel("Formation month (expanding-window train end)")
+    ax_t.grid(True, alpha=0.3)
 
-
-def plot_path(path_df: pd.DataFrame, ylabel: str, title: str, out_path: Path,
-              ref_lines: tuple[float, ...] = ()) -> None:
-    """Plot each factor's expanding-window quantity (weight or t-stat) over the
-    walk-forward period.  ``ref_lines`` draws dashed horizontal references (e.g.
-    the ±t significance bands)."""
-    fig, ax = plt.subplots(figsize=(11, 5))
-    for col in path_df.columns:
-        ax.plot(path_df.index, path_df[col], label=col, linewidth=1.3)
-    ax.axhline(0.0, color="black", linewidth=0.6)
-    for y in ref_lines:
-        ax.axhline(y, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
-    ax.set_title(title)
-    ax.set_xlabel("Formation month (expanding-window train end)")
-    ax.set_ylabel(ylabel)
-    ax.legend(title="Factor", ncol=min(len(path_df.columns), 4), loc="best", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    fig.suptitle("Experiment 3 -- expanding-window factor weights & t-stats over time\n"
+                 f"{' + '.join(factor_names)}", fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
+
+
+def _benchmark_extra_metrics(factor_names: list[str]) -> list[tuple[str, str, str, bool]]:
+    """``render_performance`` rows for the alpha (+ t-stat) the weighted book earns
+    above each constituent's standalone factor book -- keyed to match
+    :func:`bivariate_tertile.benchmark_alphas`' ``alpha_vs_<f>`` output."""
+    extra: list[tuple[str, str, str, bool]] = []
+    for f in factor_names:
+        extra.append((f"α vs {f} book (monthly)", f"alpha_vs_{f}", "pct", False))
+        extra.append((f"    α t-stat vs {f}", f"alpha_tstat_vs_{f}", "num", True))
+    return extra
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +269,9 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     # 1. Exposures + pooled-regression frame (normalised vs the unweighted industry mean).
     exposures, next_ret, fit, names = build_fit(resolved)
 
-    # 2. Full-sample reference premia (coefficients.png -- t-stats over the entire time).
+    # 2. Full-sample reference premia (t-stats over the entire period, printed to
+    #    the console as a sanity check; the traded book uses the expanding-window
+    #    weights, not these).
     coef_full = _premia(fit, names)
 
     # 3. Expanding-window weights -> walk-forward score + beta / t-stat paths.
@@ -316,22 +296,18 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     # Largest single-name ownership for a $100M dollar-neutral book (worst case over
     # the walk-forward window), from the same Q5/Q1 leg membership the cost uses.
     C.attach_ownership(stats, C.leg_ownership(legs))
+    # Alpha the walk-forward book earns *above* each constituent's standalone factor
+    # book -- does weighting the constituents add return beyond simply holding them?
+    # (same benchmark-relative estimator bivariate_tertile uses; regressed only over
+    # the overlapping OOS months since market_regression inner-joins on the index).
+    benchmarks = {f: C.factor_long_short(f) for f in factor_names}
+    stats.update(BT.benchmark_alphas(spread, benchmarks))
     windows = [(win_label, stats)]
 
     # --- Persist outputs --------------------------------------------------- #
-    coef_full.to_csv(out_dir / "coefficients.csv", index=False)
-    render_coefficients(coef_full, resolved, out_dir / "coefficients.png")
-
     beta_path.to_csv(out_dir / "beta_path.csv")
     tstat_path.to_csv(out_dir / "tstat_path.csv")
-    plot_path(beta_path, "coefficient = weight  (ind-rel /mo per 1σ)",
-              "Experiment 3 -- expanding-window factor weights over time\n"
-              f"{' + '.join(factor_names)}",
-              out_dir / "beta_path.png")
-    plot_path(tstat_path, "clustered t-stat",
-              "Experiment 3 -- expanding-window factor t-stats over time\n"
-              f"{' + '.join(factor_names)}",
-              out_dir / "tstat_path.png", ref_lines=(-2.0, -1.65, 1.65, 2.0))
+    plot_paths(beta_path, tstat_path, factor_names, out_dir / "beta_path.png")
 
     C.plot_long_short(spread, factor_names, stats["sharpe"], stats["alpha"],
                       stats["alpha_tstat"], out_dir / "long_short.png",
@@ -345,7 +321,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
         "every traded month is out-of-sample   |   "
         "Shading: |t| ≥ 1.65 (10%), 2.0 (5%).",
         out_dir / "performance.png",
-        extra_metrics=[C.ownership_metric()])
+        extra_metrics=_benchmark_extra_metrics(factor_names) + [C.ownership_metric()])
 
     # --- Console summary --------------------------------------------------- #
     print("Full-sample premia (reference t-stats over the entire period):")

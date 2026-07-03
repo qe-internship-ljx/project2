@@ -25,7 +25,7 @@ mirroring the Experiment 1 / Experiment 2 layout one-for-one::
 The ``factor_correlation`` step reuses Experiment 3's panel-agnostic
 ``factor_correlation.run`` to quantify how little of each R&D factor is spanned
 by the Exp1 general market factors -- the empirical backing for the "not
-correlated with existing factors" claim in ``R&D factors.md``.
+correlated with existing factors" claim in ``R&D factors.pdf``.
 
 Run standalone::
 

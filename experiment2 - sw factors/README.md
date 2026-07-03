@@ -51,11 +51,10 @@ Standard/              # established §2.2 factors (outputs of sw_factors.py)
                 + normalized_regression.{csv,png}
     factor_correlation/ <factor>/...   # redundancy of each factor vs the Exp1 general factors
 RD/                    # R&D-behaviour factor library (rd_factors.py + main_rd.py)
-Rev & Cost/            # revenue/cost-dynamics factor library (revcost_factors.py + main_revcost.py)
 Stability/             # fundamental-consistency factor library (stability_factors.py + main_stability.py)
 Skew/                  # return/growth skewness factor library (skew_factors.py + main_skew.py)
 Cross_val/             # re-test of the top factors on Banks+Insurance+Commodity Producers
-top_factors/           # cross-subexperiment ranking + hand-off for Experiments 3-5
+factor_ranking/        # cross-subexperiment ranking + hand-off for Experiments 3-5
 ```
 
 Each subexperiment folder mirrors `Standard/`'s layout (`factor_panel.csv`,
@@ -71,31 +70,30 @@ labels.
 | Folder | Library | Factors |
 |---|---|---|
 | `Standard/` | `sw_factors.py` | `intangible_value`, `intangible_profitability`, `rd_productivity`, `buyback_quality`, `fscore`, `zscore` |
-| `RD/` | `rd_factors.py` | `rd_growth`, `rd_conversion`, `rd_stability`, `innovation_mix`, `rd_intensity` — see `RD/R&D factors.md`; `rd_stability` is the keeper |
-| `Rev & Cost/` | `revcost_factors.py` | `revenue_stability`, `deferred_rev_intensity`, `cost_scalability`, `labor_productivity`, `gross_margin` — see `Rev & Cost/Theory & hypothesis.md` and `results.md` |
-| `Stability/` | `stability_factors.py` | second moments of quality: `cashflow_stability`, `return_stability`, `gross_profitability_stability` |
+| `RD/` | `rd_factors.py` | `rd_growth`, `rd_conversion`, `rd_stability`, `innovation_mix`, `rd_intensity` — see `RD/R&D factors.pdf`; `rd_stability` is the keeper |
+| `Stability/` | `stability_factors.py` | second moments of quality: `revenue_stability`, `cashflow_stability`, `return_stability`, `gross_profitability_stability` |
 | `Skew/` | `skew_factors.py` | `return_skewness`, `revenue_growth_skewness`, `eps_skewness` (all long-low: lottery/lumpiness aversion) |
 | `Cross_val/` | `crossval_factors.py` | re-tests the top `TOP_N` ranked factors on the **Banks + Insurance + Commodity Producers** universe (excluded from the ranking — different cross-section) |
 
 After all subexperiments finish, `main.py` **collects** every
 `quintile/long_short_market_alpha.csv` (Experiment 1's general factors on the
 software universe + every software subexperiment), ranks all factors by the sum
-of their full-period and 2016+ alpha t-stats, and writes the hand-off consumed
-by Experiments 3–5 to `top_factors/`:
-`all_factors_ranked.csv`, `top_factors.csv` (top 5), `top_factors.md` (with each
-factor's definition & intuition), and the rendered alpha tables.
+of their full-period and 2016+ alpha t-stats, and writes the single ranking
+consumed by Experiments 3–5 to `factor_ranking/`:
+`monthly_quintile_ranked.csv` (every factor, ranked — each downstream experiment
+slices its own top N) and the rendered alpha tables.
 
 ## Run
 
 ```bash
 python main.py            # Standard pipeline + software subexperiments + top-factor collection
 python main.py collect    # only (re)collect the top factors from existing CSVs
-python Cross_val/main_crossval.py   # run manually AFTER the collection (reads top_factors.csv)
+python Cross_val/main_crossval.py   # run manually AFTER the collection (reads monthly_quintile_ranked.csv)
 python sw_factors.py      # rebuild the Standard factor panel only
-python tertile.py         # tertile re-evaluation -> top_factors/tertile_long_short_market_alpha.png
+python tertile.py         # tertile re-evaluation -> factor_ranking/monthly_tertile.png
 python quarter_position.py  # quarterly-repositioned re-evaluation (end Feb/May/Aug/Nov), quintile + tertile
-                            #   -> top_factors/quarter_position_long_short_market_alpha.png         (quintile)
-                            #   -> top_factors/quarter_position_tertile_long_short_market_alpha.png (tertile)
+                            #   -> factor_ranking/quarter_quintile.png (quintile)
+                            #   -> factor_ranking/quarter_tertile.png  (tertile)
 ```
 
 ## Factors
@@ -131,7 +129,7 @@ throughout Experiment 1 (the monthly analogue of the plan's "4 quarters").
 novel factors of the original proposal, the search for new signals now follows a
 focused direction — extrapolating the **R&D activity** software firms rely on
 (its growth, conversion into profit, consistency, and composition). That work
-lives in the sibling **`RD/`** library; see `RD/R&D factors.md`.
+lives in the sibling **`RD/`** library; see `RD/R&D factors.pdf`.
 
 ## Trading cost
 

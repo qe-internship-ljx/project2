@@ -4,9 +4,9 @@ composite.py
 
 Experiment 3 -- composite z-score quintile long/short.
 
-Combine Experiment 2's **top five factors** -- the cross-experiment hand-off in
-``top_factors/top_factors.csv``, the same candidate set ``factor_momentum.py``
-rotates across -- into one cross-sectional score, the sum of each stock's
+Combine Experiment 2's **top five factors** -- the top five of the cross-experiment
+ranking ``factor_ranking/monthly_quintile_ranked.csv``, the same candidate set
+``factor_momentum.py`` rotates across -- into one cross-sectional score, the sum of each stock's
 sign-oriented factor z-scores, and run Experiment 1's quintile workflow on that
 composite::
 
@@ -107,15 +107,13 @@ LIBRARIES: list[dict] = [
     _exp2_lib("Skew", "skew factors"),
 ]
 
-# The cross-experiment top-factor hand-off (written by
-# ``experiment2 - sw factors/main.py``, ranking Experiment 1's general market
-# factors together with every Experiment 2 software subexperiment by alpha
-# t-stat); ``top_factors()`` reads its factor list.  The same collect step also
-# persists the FULL ranking (every tested factor, same row schema) -- modules
-# that sweep the whole candidate set (e.g. Experiment 4's spread timing) read
-# ``ALL_FACTORS_CSV`` instead.
-TOP_FACTORS_CSV = EXP2_DIR / "top_factors" / "top_factors.csv"
-ALL_FACTORS_CSV = EXP2_DIR / "top_factors" / "all_factors_ranked.csv"
+# The cross-experiment factor ranking (written by ``experiment2 - sw factors/
+# main.py``, ranking Experiment 1's general market factors together with every
+# Experiment 2 software subexperiment by alpha t-stat).  This is the single
+# hand-off every downstream experiment reads: the top-N consumers slice its
+# leaders via :func:`load_top_factors` / :func:`top_factors`, while modules that
+# sweep the whole candidate set (e.g. Experiment 4's spread timing) read every row.
+RANKED_CSV = EXP2_DIR / "factor_ranking" / "monthly_quintile_ranked.csv"
 TOP_N = 5
 
 # --------------------------------------------------------------------------- #
@@ -171,20 +169,32 @@ import cost as COST                       # registered by _load_exp1; the turnov
 # --------------------------------------------------------------------------- #
 # Step 1 -- resolve the requested factors to (source panel, bullish sign)
 # --------------------------------------------------------------------------- #
-def top_factors(csv_path: Path = TOP_FACTORS_CSV, n: int = TOP_N) -> list[str]:
-    """The active top-``n`` factor names from the cross-experiment top-factor
-    hand-off (``top_factors.csv``), ranked by industry-neutral alpha t-stat.
+def load_top_factors(csv_path: Path = RANKED_CSV, n: int | None = TOP_N) -> pd.DataFrame:
+    """The single top-factor retrieval every downstream experiment shares.
 
-    Reads the *current* file each call, so the composite always tracks whatever
-    factors rank highest after the latest Experiment 1/2 run; the rows are
-    pre-sorted by rank, so the first ``n`` are the leaders.  Raises a clear error
-    if the hand-off is missing."""
+    Reads Experiment 2's factor ranking (``monthly_quintile_ranked.csv``) -- one
+    row per factor carrying its ``factor`` name, source ``subexperiment``, bullish
+    ``direction``, ``family`` and alpha stats -- pre-sorted by industry-neutral
+    alpha t-stat.  ``n`` keeps the top-``n`` leaders (the default, the top-5 book
+    consumers want); ``n=None`` returns every ranked factor (the full-sweep
+    consumers, e.g. Experiment 4's spread timing).
+
+    Reads the *current* file each call, so callers always track whatever factors
+    rank highest after the latest Experiment 1/2 run.  Raises a clear error if the
+    ranking is missing."""
     if not Path(csv_path).exists():
         raise FileNotFoundError(
             f"{csv_path} not found.  Run Experiment 2 first -- `python main.py` "
             "(or `python main.py collect`) in 'experiment2 - sw factors' writes "
-            "the top-factor hand-off.")
-    return pd.read_csv(csv_path)["factor"].head(n).tolist()
+            "the factor ranking.")
+    ranked = pd.read_csv(csv_path)
+    return (ranked if n is None else ranked.head(n)).reset_index(drop=True)
+
+
+def top_factors(csv_path: Path = RANKED_CSV, n: int = TOP_N) -> list[str]:
+    """The active top-``n`` factor names, in rank order -- a thin name view over
+    :func:`load_top_factors`."""
+    return load_top_factors(csv_path, n)["factor"].tolist()
 
 
 def resolve_factors(factor_names: list[str]) -> pd.DataFrame:
@@ -485,8 +495,12 @@ def book_stats(spread: pd.Series, industry: pd.Series,
 
     Window-parameterised so the same helper serves the full / past-decade split
     here and the walk-forward out-of-sample window in ``weighted_composite.py``.
-    All quantities use Experiment 1's own helpers, so "alpha" is defined
-    identically to every other long/short book in the project.
+    All quantities use Experiment 1's own helpers, so "alpha" is defined identically
+    to every other long/short book in the project.  ``sharpe_neutral`` is the
+    walk-forward beta-neutral Sharpe (:func:`regression.beta_neutral_sharpe`): the
+    *full* spread/industry are handed to it with the window bounds, so each month's
+    hedge beta is fit on an expanding, look-ahead-free window of all prior data even
+    when the window starts mid-sample.
     """
     s, mkt = spread, industry
     if start is not None:
@@ -498,7 +512,7 @@ def book_stats(spread: pd.Series, industry: pd.Series,
     return {**stats,
             "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
             "ind_beta": mreg["beta"], "ind_beta_tstat": mreg["beta_tstat"],
-            "sharpe_neutral": R.beta_neutral_sharpe(s, mkt, mreg["beta"])}
+            "sharpe_neutral": R.beta_neutral_sharpe(spread, industry, start=start, end=end)}
 
 
 def attach_net_cost_sharpe(stats: dict, spread: pd.Series, cost_series: pd.Series,
@@ -512,16 +526,15 @@ def attach_net_cost_sharpe(stats: dict, spread: pd.Series, cost_series: pd.Serie
     Sets two keys: ``sharpe_cost`` (Experiment 1's :func:`regression.net_of_cost_sharpe`
     -- the annualised Sharpe of the book's gross spread less its per-month turnover
     cost) and ``sharpe_cost_neutral`` (:func:`regression.net_of_cost_neutral_sharpe`
-    -- the same net series hedged with ``-beta*industry`` using the window's gross
-    industry beta ``stats['ind_beta']``, the identical hedge ratio behind
-    ``sharpe_neutral``).  ``start`` / ``end`` window it exactly as ``book_stats``.
-    The cost model / alignment is Experiment 1's, so this cost-incorporated Sharpe
-    is defined identically to every other book's.
+    -- the same net series hedged with the walk-forward ``-beta*industry`` overlay
+    behind ``sharpe_neutral``, betas re-estimated on an expanding, look-ahead-free
+    window).  ``start`` / ``end`` window it exactly as ``book_stats``.  The cost
+    model / alignment is Experiment 1's, so this cost-incorporated Sharpe is defined
+    identically to every other book's.
     """
     stats["sharpe_cost"] = R.net_of_cost_sharpe(spread, cost_series, start=start, end=end)
     stats["sharpe_cost_neutral"] = R.net_of_cost_neutral_sharpe(
-        spread, cost_series, industry, stats.get("ind_beta", np.nan),
-        start=start, end=end)
+        spread, cost_series, industry, start=start, end=end)
     return stats
 
 
@@ -601,7 +614,6 @@ PERF_METRICS: list[tuple[str, str, str, bool]] = [
     ("Sharpe (annualised)",          "sharpe",         "num", False),
     ("Industry-neutral α (monthly)", "alpha",          "pct", False),
     ("α t-stat",                     "alpha_tstat",    "num", True),
-    ("Industry β",                   "ind_beta",       "num", False),
     ("β-neutral Sharpe",             "sharpe_neutral", "num", False),
 ]
 
@@ -697,8 +709,8 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
 def run(out_root: Path = OUTPUT_DIR) -> dict:
     """
     Run the straight-sum composite pipeline on the active top-five factors
-    (Experiment 2's ``top_factors.csv`` hand-off, the same candidate set
-    ``factor_momentum.py`` rotates across) and write the two outputs --
+    (the top five of Experiment 2's ``monthly_quintile_ranked.csv`` ranking, the
+    same candidate set ``factor_momentum.py`` rotates across) and write the two outputs --
     ``quintile_cumulative.png`` and ``performance.png`` -- under
     ``out_root / "composite"``.  Returns the per-window performance dict.
     """

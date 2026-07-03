@@ -111,7 +111,7 @@ DECADE_START = C.DECADE_START                # "past decade" cut-off (2016+), pr
 # strategy is regressed on each one to measure the alpha it earns *above* that
 # book (does the double sort add return beyond simply holding these factors?).
 # Both resolve through composite's library catalog (gross_profitability lives in
-# Experiment 1, revenue_stability in Experiment 2's Rev & Cost library).
+# Experiment 1, revenue_stability in Experiment 2's Stability library).
 BENCHMARK_FACTORS = ["gross_profitability", "revenue_stability"]
 
 # The capital assumption behind the largest-single-name ownership row lives in

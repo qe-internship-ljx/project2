@@ -71,6 +71,14 @@ DECADE_START = pd.Timestamp("2016-01-01")  # "past decade" cut-off
 N_QUINTILES = 5
 MONTHS_PER_YEAR = 12
 
+# Minimum months of history before the walk-forward industry hedge activates.  The
+# beta-neutral Sharpe hedges each month with a beta estimated on an *expanding*
+# window of only the data available up to that month (no look-ahead), so the first
+# HEDGE_MIN_MONTHS months -- too little history for a stable slope -- are left
+# unhedged and drop out of the hedged series.  36 months (3 years) is the textbook
+# monthly-beta estimation window.
+HEDGE_MIN_MONTHS = 36
+
 
 # --------------------------------------------------------------------------- #
 # Core computation
@@ -153,22 +161,78 @@ def long_short_stats(spread: pd.Series) -> dict:
             "ann_return": mean * MONTHS_PER_YEAR, "n_months": n}
 
 
-def beta_neutral_sharpe(spread: pd.Series, market: pd.Series, beta: float) -> float:
-    """
-    Annualised Sharpe of the industry-beta-neutralised book.
+def _window(series: pd.Series, start: pd.Timestamp | None = None,
+            end: pd.Timestamp | None = None) -> pd.Series:
+    """Restrict a month-indexed series to an optional ``[start, end]`` window."""
+    if start is not None:
+        series = series[series.index >= start]
+    if end is not None:
+        series = series[series.index <= end]
+    return series
 
-    Hedge the long-short book's industry exposure by overlaying a ``-beta``
-    position in the industry ("market") return: ``r_hedged_t = ls_t - beta *
-    industry_t``.  ``beta`` is the exposure estimated by :func:`market_regression`
-    over the relevant window (full sample or 2016+), so the hedged series has
-    (in-sample) zero industry beta and its Sharpe measures risk-adjusted return
-    net of industry risk.  Returns NaN if ``beta`` is not finite.
+
+def expanding_betas(spread: pd.Series, market: pd.Series,
+                    min_months: int = HEDGE_MIN_MONTHS) -> pd.Series:
     """
-    df = pd.concat([spread.rename("y"), market.rename("x")], axis=1).dropna()
-    if df.empty or not np.isfinite(beta):
-        return np.nan
-    hedged = df["y"] - beta * df["x"]
-    return long_short_stats(hedged)["sharpe"]
+    Walk-forward industry betas, free of look-ahead.
+
+    For each formation month ``t`` with at least ``min_months`` earlier joint
+    observations, the industry beta is the OLS slope of the long-short spread on the
+    industry ("market") return estimated over **every month strictly before t** -- an
+    expanding window of exactly the data available at t.  It is re-estimated every
+    month via the closed-form ``cov(spread, market) / var(market)`` accumulated with
+    prefix sums (O(n) over the whole series).  Returns one beta per hedgeable month
+    (indexed by t); months without ``min_months`` of prior history are omitted.
+    """
+    df = pd.concat([spread.rename("y"), market.rename("x")], axis=1).dropna().sort_index()
+    n = len(df)
+    if n <= min_months:
+        return pd.Series(dtype=float, name="beta")
+    x = df["x"].to_numpy(dtype=float)
+    y = df["y"].to_numpy(dtype=float)
+    # Prefix sums: cs*[k] aggregates the first k observations (the months strictly
+    # before position k), so the beta hedging month k is fit on prior data only.
+    csx = np.concatenate([[0.0], np.cumsum(x)])
+    csy = np.concatenate([[0.0], np.cumsum(y)])
+    csxx = np.concatenate([[0.0], np.cumsum(x * x)])
+    csxy = np.concatenate([[0.0], np.cumsum(x * y)])
+    k = np.arange(min_months, n)
+    m = k.astype(float)                                   # prior-obs count = position
+    denom = m * csxx[k] - csx[k] ** 2
+    beta = np.where(denom > 0, (m * csxy[k] - csx[k] * csy[k]) / denom, np.nan)
+    return pd.Series(beta, index=df.index[k], name="beta")
+
+
+def _hedge_with_betas(returns: pd.Series, market: pd.Series,
+                      betas: pd.Series) -> pd.Series:
+    """Industry-hedged return ``returns_t - beta_t * market_t`` over the months where
+    the return, the market return and a walk-forward beta are all defined."""
+    df = pd.concat([returns.rename("r"), market.rename("m"), betas.rename("b")],
+                   axis=1).dropna()
+    return (df["r"] - df["b"] * df["m"]).rename("hedged")
+
+
+def beta_neutral_sharpe(spread: pd.Series, market: pd.Series,
+                        start: pd.Timestamp | None = None,
+                        end: pd.Timestamp | None = None,
+                        min_months: int = HEDGE_MIN_MONTHS) -> float:
+    """
+    Annualised Sharpe of the industry-beta-neutralised book, hedged **without
+    look-ahead**.
+
+    The book's industry exposure is neutralised by overlaying a ``-beta`` position in
+    the industry ("market") return, but ``beta`` is re-estimated every month on an
+    *expanding window* of only the data available up to that month
+    (:func:`expanding_betas`) rather than a single full-sample slope -- so the hedge
+    an investor could actually have put on carries no future information.  The Sharpe
+    is of that walk-forward hedged series (:func:`_hedge_with_betas`) restricted to
+    the optional ``[start, end]`` window; because each month's beta always uses all
+    prior history, a window starting in 2016 still hedges with betas fit on
+    2001-onward data.  Returns NaN if no month has enough history to hedge.
+    """
+    hedged = _hedge_with_betas(spread, market,
+                               expanding_betas(spread, market, min_months))
+    return long_short_stats(_window(hedged, start, end))["sharpe"]
 
 
 def _net_of_cost_spread(spread: pd.Series, cost_series: pd.Series,
@@ -202,26 +266,26 @@ def net_of_cost_sharpe(spread: pd.Series, cost_series: pd.Series,
 
 
 def net_of_cost_neutral_sharpe(spread: pd.Series, cost_series: pd.Series,
-                               market: pd.Series, beta: float,
+                               market: pd.Series,
                                start: pd.Timestamp | None = None,
-                               end: pd.Timestamp | None = None) -> float:
+                               end: pd.Timestamp | None = None,
+                               min_months: int = HEDGE_MIN_MONTHS) -> float:
     """
-    Annualised Sharpe of the **industry-beta-neutralised, net-of-cost** book.
+    Annualised Sharpe of the **industry-beta-neutralised, net-of-cost** book, hedged
+    without look-ahead.
 
     Combines :func:`net_of_cost_sharpe` and :func:`beta_neutral_sharpe`: net the
-    turnover cost from the gross spread, then hedge that net series' industry
-    exposure with a ``-beta`` overlay in the industry return (``beta`` is the book's
-    gross exposure over the same window, the identical hedge ratio behind
-    ``sharpe_neutral``).  This is the cost-incorporated counterpart of the
-    beta-neutral Sharpe.  Returns NaN if ``beta`` is not finite or the series empty.
+    turnover cost from the gross spread (:func:`_net_of_cost_spread`), then hedge that
+    net series with the same walk-forward industry betas (:func:`expanding_betas`,
+    estimated on the *gross* book -- its true industry exposure) that back
+    ``sharpe_neutral``.  The Sharpe is of the hedged net series over the optional
+    ``[start, end]`` window.  This is the cost-incorporated counterpart of the
+    beta-neutral Sharpe.  Returns NaN if no month has enough history to hedge.
     """
-    net = _net_of_cost_spread(spread, cost_series, start, end)
-    mkt = market
-    if start is not None:
-        mkt = mkt[mkt.index >= start]
-    if end is not None:
-        mkt = mkt[mkt.index <= end]
-    return beta_neutral_sharpe(net, mkt, beta)
+    net = _net_of_cost_spread(spread, cost_series)
+    hedged = _hedge_with_betas(net, market,
+                               expanding_betas(spread, market, min_months))
+    return long_short_stats(_window(hedged, start, end))["sharpe"]
 
 
 # --------------------------------------------------------------------------- #
@@ -605,14 +669,14 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
     """
     Render the per-factor long-short-vs-industry regression as a PNG table.
 
-    Each window (full sample, then the trailing 2016+ block) carries two combined
-    coefficient cells: the industry-neutral **alpha** stacked over its t-stat, and
-    the book's **market (industry) beta** stacked over its t-stat, alongside the
-    annualised Sharpe, the industry-beta-neutralised Sharpe (the book hedged with
-    -beta*industry), a combined **cost-incorporated Sharpe** cell (the raw
-    net-of-cost Sharpe stacked over its beta-neutral net-of-cost counterpart) and
-    the average turnover cost.  Alpha cells are shaded by the absolute significance
-    of their t-stat.
+    Each window (full sample, then the trailing 2016+ block) reports the
+    industry-neutral **alpha** stacked over its t-stat, alongside the annualised
+    Sharpe, the industry-beta-neutralised Sharpe (the book hedged with a
+    walk-forward ``-beta*industry`` overlay whose beta is re-estimated on an
+    expanding, look-ahead-free window -- :func:`beta_neutral_sharpe`), a combined
+    **cost-incorporated Sharpe** cell (the raw net-of-cost Sharpe stacked over its
+    beta-neutral net-of-cost counterpart) and the average turnover cost.  Alpha
+    cells are shaded by the absolute significance of their t-stat.
 
     The cost-incorporated Sharpe fields (``sharpe_cost`` / ``sharpe_cost_neutral``
     full, ``sharpe_cost_2016`` / ``sharpe_cost_neutral_2016`` for the decade) are
@@ -622,16 +686,12 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
     ``title`` overrides the figure's suptitle; when ``None`` (the default) the
     standard quintile-book caption is used, so existing callers are unchanged.
     A book built on a different bucketing (e.g. tertiles) passes its own title.
-
-    Beta fields (``beta``/``beta_tstat`` full, ``beta_2016``/``beta_tstat_2016``
-    for the decade) are read defensively so a table built before they were
-    populated still renders (the beta cell shows "—").
     """
     headers = ["Factor", "Family", "L/S\ndirection",
-               "Alpha (monthly)\n& t-stat", "Market β\n& t-stat",
+               "Alpha (monthly)\n& t-stat",
                "Sharpe\n(ann.)", "β-neutral\nSharpe",
                "Sharpe net cost\n(raw / β-neut)", "Avg cost\n(monthly)", "n",
-               "Alpha (2016+)\n& t-stat", "Market β (2016+)\n& t-stat",
+               "Alpha (2016+)\n& t-stat",
                "Sharpe\n(2016+)", "β-neutral\nSh (2016+)",
                "Sharpe net cost\n(2016+, raw/β-n)"]
 
@@ -640,31 +700,29 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
         cell_text.append([
             r["factor"], r["family"], r["direction"],
             _fmt_stat_cell(r["alpha"], r["alpha_tstat"], True),
-            _fmt_stat_cell(r.get("beta", np.nan), r.get("beta_tstat", np.nan), False),
             _fmt_num(r["sharpe"]), _fmt_num(r["sharpe_neutral"]),
             _fmt_net_sharpe_cell(r.get("sharpe_cost", np.nan),
                                  r.get("sharpe_cost_neutral", np.nan)),
             f"{-r['avg_cost_pp'] / 100:+.4%}", f"{int(r['n'])}",
             _fmt_stat_cell(r["alpha_2016"], r["alpha_tstat_2016"], True),
-            _fmt_stat_cell(r.get("beta_2016", np.nan), r.get("beta_tstat_2016", np.nan), False),
             _fmt_num(r["sharpe_2016"]), _fmt_num(r["sharpe_neutral_2016"]),
             _fmt_net_sharpe_cell(r.get("sharpe_cost_2016", np.nan),
                                  r.get("sharpe_cost_neutral_2016", np.nan)),
         ])
         cell_colors.append([
             "white", "white", "white",
-            _tstat_color(r["alpha_tstat"]), "white",
+            _tstat_color(r["alpha_tstat"]),
             "white", "white", "white", "#fde7d6", "white",
-            _tstat_color(r["alpha_tstat_2016"]), "white", "white", "white", "white",
+            _tstat_color(r["alpha_tstat_2016"]), "white", "white", "white",
         ])
 
     n = len(rows)
-    fig, ax = plt.subplots(figsize=(18.5, 0.62 * (n + 1) + 1.4))
+    fig, ax = plt.subplots(figsize=(16.0, 0.62 * (n + 1) + 1.4))
     ax.axis("off")
 
     tbl = ax.table(cellText=cell_text, colLabels=headers, cellColours=cell_colors,
-                   colWidths=[0.10, 0.115, 0.05, 0.078, 0.07, 0.045, 0.05,
-                              0.075, 0.055, 0.026, 0.078, 0.07, 0.045, 0.05, 0.075],
+                   colWidths=[0.10, 0.12, 0.055, 0.09, 0.05, 0.058,
+                              0.085, 0.06, 0.03, 0.09, 0.05, 0.058, 0.085],
                    cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(9)
@@ -676,16 +734,16 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
         tbl[i, 1].set_text_props(ha="left")
 
     default_title = ("Long-short quintile strategy regressed on the industry return\n"
-                     "(ls_t = α + β·industry_t + ε;  α = industry-neutral monthly "
-                     "return, β = net industry exposure)")
+                     "(ls_t = α + β·industry_t + ε;  α = industry-neutral monthly return)")
     fig.suptitle(default_title if title is None else title, fontsize=11, y=0.99)
-    fig.text(0.5, 0.015, "Each coefficient cell stacks the estimate over its t-stat.  "
+    fig.text(0.5, 0.015, "The alpha cell stacks the estimate over its t-stat.  "
              "Shaded alpha t-stats: |t| ≥ 1.65 (10%), darker |t| ≥ 2.0 (5%).  "
-             "Market β = book's slope on the industry return.  Sharpe = annualised "
-             "Sharpe of the L/S book.  Sharpe net cost = annualised Sharpe of the book's "
-             "return net of turnover cost (top = raw L/S, bottom βn = industry-β-neutralised).  "
-             "Avg cost = mean monthly turnover cost (one-way, traded weight only).  "
-             "2016+ columns re-estimate on the past decade only.",
+             "Sharpe = annualised Sharpe of the L/S book.  β-neutral Sharpe hedges "
+             "the book with a walk-forward -β·industry overlay (β re-estimated on an "
+             "expanding, look-ahead-free window).  Sharpe net cost = annualised Sharpe of "
+             "the book's return net of turnover cost (top = raw L/S, bottom βn = "
+             "β-neutralised).  Avg cost = mean monthly turnover cost (one-way, traded "
+             "weight only).  2016+ columns re-estimate on the past decade only.",
              ha="center", fontsize=8, color="#555555")
     fig.subplots_adjust(left=0.02, right=0.98, top=0.80, bottom=0.10)
     fig.savefig(path, dpi=150)
@@ -759,13 +817,12 @@ def run(panel: pd.DataFrame | None = None,
         mreg_2016 = market_regression(
             spread[spread.index >= DECADE_START],
             industry_ret[industry_ret.index >= DECADE_START])
-        # Industry-beta-neutralised Sharpe: hedge the book with -beta * industry,
-        # using the beta estimated over each window (full sample / 2016+).
-        sr_neutral = beta_neutral_sharpe(spread, industry_ret, mreg["beta"])
-        sr_neutral_2016 = beta_neutral_sharpe(
-            spread[spread.index >= DECADE_START],
-            industry_ret[industry_ret.index >= DECADE_START],
-            mreg_2016["beta"])
+        # Industry-beta-neutralised Sharpe: hedge each month with a -beta * industry
+        # overlay whose beta is re-estimated on an expanding window of only the data
+        # available up to that month (no look-ahead).  The 2016+ figure windows the
+        # same walk-forward hedged series, so its betas still use all prior history.
+        sr_neutral = beta_neutral_sharpe(spread, industry_ret)
+        sr_neutral_2016 = beta_neutral_sharpe(spread, industry_ret, start=DECADE_START)
 
         # Turnover cost incurred by the book (per formation month): its time-series
         # mean (pp/month) is reported, and it also nets the gross spread for the
@@ -774,10 +831,10 @@ def run(panel: pd.DataFrame | None = None,
         avg_cost_pp = cost.average_cost(cost_series) * 100.0
         sharpe_cost = net_of_cost_sharpe(spread, cost_series)
         sharpe_cost_neutral = net_of_cost_neutral_sharpe(
-            spread, cost_series, industry_ret, mreg["beta"])
+            spread, cost_series, industry_ret)
         sharpe_cost_2016 = net_of_cost_sharpe(spread, cost_series, start=DECADE_START)
         sharpe_cost_neutral_2016 = net_of_cost_neutral_sharpe(
-            spread, cost_series, industry_ret, mreg_2016["beta"], start=DECADE_START)
+            spread, cost_series, industry_ret, start=DECADE_START)
 
         ls_dir = quintile_dir / factor
         ls_dir.mkdir(parents=True, exist_ok=True)
@@ -789,7 +846,6 @@ def run(panel: pd.DataFrame | None = None,
             "factor": factor, "family": F.FACTORS[factor]["family"],
             "direction": "Q5-Q1" if sign > 0 else "Q1-Q5",
             "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
-            "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
             "sharpe": ls["sharpe"],
             "avg_cost_pp": avg_cost_pp,
             "sharpe_cost": sharpe_cost,
@@ -802,8 +858,6 @@ def run(panel: pd.DataFrame | None = None,
             "sharpe_neutral_2016": sr_neutral_2016,
             "sharpe_cost_2016": sharpe_cost_2016,
             "sharpe_cost_neutral_2016": sharpe_cost_neutral_2016,
-            "beta_2016": mreg_2016["beta"],
-            "beta_tstat_2016": mreg_2016["beta_tstat"],
             "r2_2016": mreg_2016["r2"],
         })
 

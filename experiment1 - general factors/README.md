@@ -100,9 +100,15 @@ ls_t = α + β·industry_t + ε_t
 
 `α` is the book's **industry-neutral monthly return** and `α t-stat` tests it
 against zero — the project's standard "alpha t-stat", reused unchanged by
-Experiments 2 and 3. The book's industry `β` also gives a **β-neutral Sharpe**
-(the book hedged with `−β·industry`). All of these are estimated over the full
-sample and, separately, the **past decade (2016+)**.
+Experiments 2 and 3. The book also gets a **β-neutral Sharpe**: it is hedged with
+a `−β·industry` overlay, but `β` is re-estimated **every month on an expanding
+window of only the data available up to that month** (a walk-forward hedge, free
+of look-ahead) rather than one full-sample slope — so the Sharpe reflects a hedge
+an investor could actually have put on. The industry `β` itself is no longer
+reported as a column. All of these are estimated over the full sample and,
+separately, the **past decade (2016+)** — where the 2016+ β-neutral Sharpe simply
+windows the same walk-forward hedged series, so its monthly betas still use all
+history back to sample start.
 
 The **trading-cost model** (`cost.py`, plan §1) charges a one-way cost
 `= 3·(11/log₁₀ Mff)⁶ + 3` bps on `Mff = market cap × FX × free float` (floored at
@@ -167,9 +173,9 @@ output/software/
       quintile_cumulative.png           # 5 cumulative-growth curves (log scale)
       long_short.png                    # the signed Q5-Q1 book's cumulative growth of $1
     summary.csv                         # per-factor quintile means + long-short stats
-    long_short_market_alpha.csv         # per-factor industry-neutral alpha, β, Sharpe,
-    long_short_market_alpha.png         #   avg turnover cost, β-neutral & net-of-cost
-                                        #   Sharpe (full & 2016+)
+    long_short_market_alpha.csv         # per-factor industry-neutral alpha, Sharpe,
+    long_short_market_alpha.png         #   avg turnover cost, walk-forward β-neutral &
+                                        #   net-of-cost Sharpe (full & 2016+)
   regression/
     <factor>/
       regression.csv                    # months x {beta, alpha, tstat, r2, n}

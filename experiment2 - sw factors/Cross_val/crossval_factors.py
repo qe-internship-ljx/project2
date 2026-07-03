@@ -9,9 +9,9 @@ broad enough to probe generalisation without the cost of the whole market.  The
 same market-cap screen the software libraries apply is used.
 
 The candidate set is no longer a hand-picked pair -- it is the **top ``TOP_N``
-factors** of the cross-experiment top-factor hand-off
-(``top_factors/top_factors.csv``), read the *same way* Experiment 3's
-``factor_momentum.py`` / ``composite.py`` read it (the file is pre-sorted by
+factors** of the cross-experiment ranking
+(``factor_ranking/monthly_quintile_ranked.csv``), sliced the *same way* Experiment 3's
+``factor_momentum.py`` / ``composite.py`` slice it (the file is pre-sorted by
 industry-neutral alpha t-stat, so the first ``TOP_N`` rows are the leaders).  Each
 was discovered and validated on GICS *Software & Services*; this module asks the
 out-of-sample-universe question: **do the software-industry leaders survive in
@@ -25,7 +25,7 @@ general factors plus Experiment 2's software subexperiments), each of which is a
 **universe-parameterised** drop-in for Experiment 1's engine.  Rather than
 re-implement (or copy) each definition here, this module **reuses the source
 library verbatim**: for every requested factor it looks up its source
-subexperiment (the ``subexperiment`` column of ``top_factors.csv``), runs that
+subexperiment (the ``subexperiment`` column of ``monthly_quintile_ranked.csv``), runs that
 library's own :func:`build` on the **Banks + Insurance** universe, and keeps just
 that factor's rows.  So the construct cross-validated here is byte-for-byte the
 one that produced the software-industry ranking -- if a source definition changes,
@@ -128,11 +128,13 @@ ols = _engine.ols
 # software-universe libraries.
 OUTPUT_DIR = Path(__file__).resolve().parent
 
-# The cross-experiment top-factor hand-off (written by
-# ``experiment2 - sw factors/main.py``, ranking Experiment 1's general factors
-# together with every Experiment 2 software subexperiment by industry-neutral
-# alpha t-stat).  We test its leaders -- read exactly as Experiment 3 reads it.
-TOP_FACTORS_CSV = _EXP2_DIR / "top_factors" / "top_factors.csv"
+# Experiment 2's factor ranking (written by ``experiment2 - sw factors/main.py``,
+# ranking Experiment 1's general factors together with every Experiment 2 software
+# subexperiment by industry-neutral alpha t-stat).  We test its top-N leaders --
+# sliced the same way Experiment 3 slices it.  (This module lives in Experiment 2,
+# beside the ranking's producer, so it reads the file directly rather than
+# importing Experiment 3's ``composite`` and inverting the dependency.)
+RANKED_CSV = _EXP2_DIR / "factor_ranking" / "monthly_quintile_ranked.csv"
 TOP_N = 5
 
 # Sign the directional long/short book by each factor's canonical (software-
@@ -142,23 +144,22 @@ USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
-# Top-factor hand-off -> the factor set (read the same way Experiment 3 does)
+# Factor ranking -> the factor set (sliced the same way Experiment 3 slices it)
 # --------------------------------------------------------------------------- #
-def load_top_factors(csv_path: Path = TOP_FACTORS_CSV, n: int = TOP_N) -> pd.DataFrame:
-    """The top-``n`` rows of the cross-experiment top-factor hand-off
-    (``top_factors.csv``), pre-sorted by industry-neutral alpha t-stat -- one row
-    per factor carrying its ``factor`` name, source ``subexperiment``, bullish
-    ``direction`` and ``family``.
+def load_top_factors(csv_path: Path = RANKED_CSV, n: int = TOP_N) -> pd.DataFrame:
+    """The top-``n`` rows of Experiment 2's factor ranking
+    (``monthly_quintile_ranked.csv``), pre-sorted by industry-neutral alpha t-stat
+    -- one row per factor carrying its ``factor`` name, source ``subexperiment``,
+    bullish ``direction`` and ``family``.
 
     Read afresh each call, so the cross-validation always tracks whatever factors
     rank highest after the latest Experiment 1/2 run.  Raises a clear error if the
-    hand-off is missing (identical contract to ``composite.top_factors`` /
-    ``factor_momentum.load_top_factors``)."""
+    ranking is missing (same top-N slice as ``composite.load_top_factors``)."""
     if not Path(csv_path).exists():
         raise FileNotFoundError(
             f"{csv_path} not found.  Run Experiment 2 first -- `python main.py` "
             "(or `python main.py collect`) in 'experiment2 - sw factors' writes "
-            "the top-factor hand-off.")
+            "the factor ranking.")
     return pd.read_csv(csv_path).head(n).reset_index(drop=True)
 
 
@@ -258,7 +259,7 @@ def build_general_market_panel(rebuild: bool = False) -> Path:
 # Source libraries -- resolve each top factor to the library that computes it
 # --------------------------------------------------------------------------- #
 # Every factor in the hand-off is produced by exactly one source library.  We map
-# the ``subexperiment`` label recorded in ``top_factors.csv`` to that library's
+# the ``subexperiment`` label recorded in ``monthly_quintile_ranked.csv`` to that library's
 # module file; "General" is Experiment 1's engine (already loaded above).  Each
 # library is a universe-parameterised drop-in whose ``build(save, u)`` computes
 # all its factors on universe ``u`` and returns the tidy (date, stock_id, factor,
@@ -266,7 +267,6 @@ def build_general_market_panel(rebuild: bool = False) -> Path:
 _SOURCE_LIB_PATHS: dict[str, Path] = {
     "Standard":   _EXP2_DIR / "sw_factors.py",
     "RD":         _EXP2_DIR / "RD" / "rd_factors.py",
-    "Rev & Cost": _EXP2_DIR / "Rev & Cost" / "revcost_factors.py",
     "Stability":  _EXP2_DIR / "Stability" / "stability_factors.py",
     "Skew":       _EXP2_DIR / "Skew" / "skew_factors.py",
 }

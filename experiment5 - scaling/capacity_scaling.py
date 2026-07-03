@@ -4,8 +4,8 @@ capacity_scaling.py
 
 Re-evaluate **exactly the same set of factors** as
 ``experiment2 - sw factors/tertile.py`` -- Experiment 1's general market factors
-plus every Experiment 2 software subexperiment (Standard, RD, Rev & Cost,
-Stability, Skew) -- but change **how the two legs are weighted**.
+plus every Experiment 2 software subexperiment (Standard, RD, Stability, Skew)
+-- but change **how the two legs are weighted**.
 
 Where the standard quintile book (and ``tertile.py``) equal-weights every name
 inside the top and bottom bucket, here each name is weighted by a monotone
@@ -28,7 +28,7 @@ and every downstream statistic are identical to the quintile pipeline, so each
 alpha table reads directly against the standard (equal-weighted) quintile book.
 
 The output is one alpha table per weighting scheme, in the *same* format as
-``experiment2 - sw factors/top_factors/tertile_long_short_market_alpha.png``.
+``experiment2 - sw factors/factor_ranking/monthly_tertile.png``.
 
 Bivariate extension (Experiment 3's double sort)
 ------------------------------------------------
@@ -253,9 +253,11 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
     ls_2016 = regression.long_short_stats(spread[recent])
     mreg = regression.market_regression(spread, industry_ret)
     mreg_2016 = regression.market_regression(spread[recent], ind_recent)
-    sr_neutral = regression.beta_neutral_sharpe(spread, industry_ret, mreg["beta"])
-    sr_neutral_2016 = regression.beta_neutral_sharpe(
-        spread[recent], ind_recent, mreg_2016["beta"])
+    # Beta-neutral Sharpe: hedge with a walk-forward -beta*industry overlay whose
+    # beta is re-estimated on an expanding, look-ahead-free window (2016+ windows the
+    # same hedged series, so its betas still use all prior history).
+    sr_neutral = regression.beta_neutral_sharpe(spread, industry_ret)
+    sr_neutral_2016 = regression.beta_neutral_sharpe(spread, industry_ret, start=DECADE_START)
 
     # Turnover cost of the ACTUAL sqrt-cap-weighted legs (not equal-weighted), so
     # the reported cost matches the book measured above.  Its mean (pp/month) is
@@ -266,21 +268,19 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
     avg_cost_pp = cost.average_cost(cost_series) * 100.0
     sharpe_cost = regression.net_of_cost_sharpe(spread, cost_series)
     sharpe_cost_neutral = regression.net_of_cost_neutral_sharpe(
-        spread, cost_series, industry_ret, mreg["beta"])
+        spread, cost_series, industry_ret)
     sharpe_cost_2016 = regression.net_of_cost_sharpe(spread, cost_series, start=DECADE_START)
     sharpe_cost_neutral_2016 = regression.net_of_cost_neutral_sharpe(
-        spread, cost_series, industry_ret, mreg_2016["beta"], start=DECADE_START)
+        spread, cost_series, industry_ret, start=DECADE_START)
 
     return {
         "factor": factor, "family": family,
         "direction": "Q5-Q1" if sign > 0 else "Q1-Q5",
         "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
-        "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
         "sharpe": ls["sharpe"], "sharpe_neutral": sr_neutral,
         "sharpe_cost": sharpe_cost, "sharpe_cost_neutral": sharpe_cost_neutral,
         "avg_cost_pp": avg_cost_pp, "n": mreg["n"],
         "alpha_2016": mreg_2016["alpha"], "alpha_tstat_2016": mreg_2016["alpha_tstat"],
-        "beta_2016": mreg_2016["beta"], "beta_tstat_2016": mreg_2016["beta_tstat"],
         "sharpe_2016": ls_2016["sharpe"], "sharpe_neutral_2016": sr_neutral_2016,
         "sharpe_cost_2016": sharpe_cost_2016,
         "sharpe_cost_neutral_2016": sharpe_cost_neutral_2016,
@@ -329,7 +329,7 @@ def run(raw_weight, title: str, out_png: Path, label: str) -> pd.DataFrame:
                   .reset_index(drop=True))
 
     # Render in the standard alpha-table format, tagging each family with its
-    # source subexperiment for provenance -- exactly like the tertile / top_factors PNG.
+    # source subexperiment for provenance -- exactly like the tertile / factor_ranking PNG.
     plot_rows = table.copy()
     plot_rows["family"] = plot_rows["family"] + "  [" + plot_rows["subexperiment"] + "]"
     out_png.parent.mkdir(parents=True, exist_ok=True)

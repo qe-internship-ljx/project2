@@ -4,7 +4,7 @@ quarter_position.py
 
 Re-evaluate **exactly the same set of factors** as ``tertile.py`` -- Experiment 1's
 general market factors plus every Experiment 2 software subexperiment (Standard,
-RD, Rev & Cost, Stability, Skew) -- with the same long/short book, but
+RD, Stability, Skew) -- with the same long/short book, but
 **repositioned quarterly instead of monthly**.
 
 Two bucketings are produced (see :data:`BUCKETINGS`), one alpha table each:
@@ -14,7 +14,7 @@ Two bucketings are produced (see :data:`BUCKETINGS`), one alpha table each:
 
 so the quintile table reads directly against Experiment 1's standard monthly
 quintile books and the tertile table reads directly against the monthly
-``tertile_long_short_market_alpha.png``.
+``monthly_tertile.png``.
 
 Where the monthly book re-sorts the whole cross-section every month, here new
 buckets are formed only at the **end of February, May, August and November**
@@ -71,7 +71,7 @@ Nothing here mutates the shared modules or ``tertile.py``.
 
 Run standalone::
 
-    python quarter_position.py    # -> top_factors/quarter_position[_tertile]_long_short_market_alpha.png
+    python quarter_position.py    # -> factor_ranking/quarter_position[_tertile]_long_short_market_alpha.png
 """
 
 from __future__ import annotations
@@ -135,10 +135,10 @@ def _title(bucket_word: str, top_leg: str) -> str:
 # row to test another bucketing.
 BUCKETINGS = [
     {"label": "quintile", "n": 5,
-     "out_png": _THIS_DIR / "top_factors" / "quarter_position_long_short_market_alpha.png",
+     "out_png": _THIS_DIR / "factor_ranking" / "quarter_quintile.png",
      "title": _title("quintile", "top fifth")},
     {"label": "tertile", "n": 3,
-     "out_png": _THIS_DIR / "top_factors" / "quarter_position_tertile_long_short_market_alpha.png",
+     "out_png": _THIS_DIR / "factor_ranking" / "quarter_tertile.png",
      "title": _title("tertile", "top third")},
 ]
 
@@ -207,8 +207,11 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
     ls_2016 = regression.long_short_stats(spread[recent])
     mreg = regression.market_regression(spread, industry_ret)
     mreg_2016 = regression.market_regression(spread[recent], ind_recent)
-    sr_neutral = regression.beta_neutral_sharpe(spread, industry_ret, mreg["beta"])
-    sr_neutral_2016 = regression.beta_neutral_sharpe(spread[recent], ind_recent, mreg_2016["beta"])
+    # Beta-neutral Sharpe: hedge with a walk-forward -beta*industry overlay whose
+    # beta is re-estimated on an expanding, look-ahead-free window (2016+ windows the
+    # same hedged series, so its betas still use all prior history).
+    sr_neutral = regression.beta_neutral_sharpe(spread, industry_ret)
+    sr_neutral_2016 = regression.beta_neutral_sharpe(spread, industry_ret, start=DECADE_START)
 
     # Turnover cost of the ACTUAL quarterly-held legs: membership (and the equal
     # weight within each leg) is constant between reposition dates, so the turnover
@@ -223,21 +226,19 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
     avg_cost_pp = cost.average_cost(cost_series) * 100.0
     sharpe_cost = regression.net_of_cost_sharpe(spread, cost_series)
     sharpe_cost_neutral = regression.net_of_cost_neutral_sharpe(
-        spread, cost_series, industry_ret, mreg["beta"])
+        spread, cost_series, industry_ret)
     sharpe_cost_2016 = regression.net_of_cost_sharpe(spread, cost_series, start=DECADE_START)
     sharpe_cost_neutral_2016 = regression.net_of_cost_neutral_sharpe(
-        spread, cost_series, industry_ret, mreg_2016["beta"], start=DECADE_START)
+        spread, cost_series, industry_ret, start=DECADE_START)
 
     return {
         "factor": factor, "family": family,
         "direction": _dir_label(sign, n),
         "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
-        "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
         "sharpe": ls["sharpe"], "sharpe_neutral": sr_neutral,
         "sharpe_cost": sharpe_cost, "sharpe_cost_neutral": sharpe_cost_neutral,
         "avg_cost_pp": avg_cost_pp, "n": mreg["n"],
         "alpha_2016": mreg_2016["alpha"], "alpha_tstat_2016": mreg_2016["alpha_tstat"],
-        "beta_2016": mreg_2016["beta"], "beta_tstat_2016": mreg_2016["beta_tstat"],
         "sharpe_2016": ls_2016["sharpe"], "sharpe_neutral_2016": sr_neutral_2016,
         "sharpe_cost_2016": sharpe_cost_2016,
         "sharpe_cost_neutral_2016": sharpe_cost_neutral_2016,
@@ -287,7 +288,7 @@ def run(n: int, title: str, out_png: Path, label: str) -> pd.DataFrame:
                   .reset_index(drop=True))
 
     # Render in the standard alpha-table format, tagging each family with its
-    # source subexperiment for provenance -- exactly like the tertile / top_factors PNG.
+    # source subexperiment for provenance -- exactly like the tertile / factor_ranking PNG.
     plot_rows = table.copy()
     plot_rows["family"] = plot_rows["family"] + "  [" + plot_rows["subexperiment"] + "]"
     out_png.parent.mkdir(parents=True, exist_ok=True)

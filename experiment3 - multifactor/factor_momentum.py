@@ -5,9 +5,9 @@ factor_momentum.py
 Experiment 3 -- factor-momentum rotation across Experiment 2's top factors.
 
 Take the five software-industry factors Experiment 2 ranks highest by
-industry-neutral alpha t-stat (the hand-off written by
-``experiment2 - sw factors/main.py`` to ``top_factors/top_factors.csv``) and run
-a **factor-momentum** strategy on them:
+industry-neutral alpha t-stat (the top five of the ranking written by
+``experiment2 - sw factors/main.py`` to ``factor_ranking/monthly_quintile_ranked.csv``)
+and run a **factor-momentum** strategy on them:
 
     re-select every 3 months the single factor whose own long/short book earned
     the most over the *trailing 12 months*, and hold that pick -- rebalanced
@@ -39,7 +39,7 @@ Nothing generic is re-implemented:
 
 * the per-factor long/short returns are read straight from each subexperiment's
   ``quintile/<factor>/quintile_returns.csv`` (the ``Q5-Q1`` column) and oriented
-  by the ``direction`` recorded in ``top_factors.csv`` -- no return is recomputed;
+  by the ``direction`` recorded in ``monthly_quintile_ranked.csv`` -- no return is recomputed;
 * the within-industry "market" return, the industry-neutral alpha / Sharpe
   statistics (``industry_return`` / ``book_stats``) and the performance-table
   renderer (``render_performance``) are imported from ``composite.py``, so
@@ -102,26 +102,16 @@ import bivariate_tertile as BT         # double-sort pipeline reused for the top
 # --------------------------------------------------------------------------- #
 # Paths / configuration
 # --------------------------------------------------------------------------- #
-TOP_FACTORS_CSV = C.EXP2_DIR / "top_factors" / "top_factors.csv"
+TOP_FACTORS_CSV = C.RANKED_CSV         # Experiment 2's factor ranking (top-N sliced below)
 OUTPUT_DIR = C.OUTPUT_DIR / "factor_momentum"
 UNIVARIATE_DIR = OUTPUT_DIR / "univariate"   # the monthly one-factor rotation
 BIVARIATE_DIR = OUTPUT_DIR / "bivariate"     # double sort of the trailing-12m top two
 DECADE_START = C.DECADE_START          # 2016-01-01, the project "past decade" cut-off
 SPREAD_COL = "Q5-Q1"                   # long/short column in each quintile_returns.csv
 
-
-# --------------------------------------------------------------------------- #
-# Step 1 -- the candidate set and each candidate's standalone long/short book
-# --------------------------------------------------------------------------- #
-def load_top_factors(csv_path: Path = TOP_FACTORS_CSV) -> pd.DataFrame:
-    """Load Experiment 2's top-factor hand-off (factor, source subexperiment and
-    bullish ``direction`` per row).  Raises a clear error if it is missing."""
-    if not Path(csv_path).exists():
-        raise FileNotFoundError(
-            f"{csv_path} not found.  Run Experiment 2 first -- "
-            "`python main.py` (or `python main.py collect`) in "
-            "'experiment2 - sw factors' writes the top-factor hand-off.")
-    return pd.read_csv(csv_path)
+# The candidate set is the top-N leaders of Experiment 2's ranking, read through
+# the single shared retrieval in ``composite``.
+load_top_factors = C.load_top_factors
 
 
 def signed_spread(subexperiment: str, factor: str, direction: str) -> pd.Series:

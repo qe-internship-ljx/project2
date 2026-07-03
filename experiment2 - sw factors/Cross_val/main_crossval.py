@@ -4,7 +4,7 @@ main_crossval.py
 
 Experiment 2 driver for the **cross-validation** library (``crossval_factors.py``):
 re-test Experiment 2's **top ``TOP_N`` factors** (the leaders of the
-``top_factors/top_factors.csv`` hand-off, resolved to their source libraries) on
+``factor_ranking/monthly_quintile_ranked.csv`` ranking, resolved to their source libraries) on
 the **Banks + Insurance + Commodity Producers** universe, using the *same pipeline*
 as the ``Stability/`` subfolder.
 

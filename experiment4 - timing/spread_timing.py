@@ -26,8 +26,8 @@ re-establishment on re-entry) and the timed book is compared to the always-on
 book on an after-cost basis, over the common sample where the signal is defined.
 
 The candidate factors are exactly Experiment 2's FULL cross-experiment ranking
-(``experiment2 - sw factors/top_factors/all_factors_ranked.csv`` -- every factor
-in ``quintile_long_short_market_alpha.png``, not just the top-5 hand-off), so
+(``experiment2 - sw factors/factor_ranking/monthly_quintile_ranked.csv`` -- every factor
+in ``monthly_quintile.png``, not just the top five), so
 re-running Experiment 2's ``collect`` step re-points this module automatically.
 
 Engine reuse (the project's dependency-injection convention)
@@ -85,7 +85,7 @@ F = C.F                      # the Experiment 1 engine, wired for the software u
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-CANDIDATES_CSV = C.ALL_FACTORS_CSV            # the FULL ranking, not the top-5 hand-off
+CANDIDATES_CSV = C.RANKED_CSV                 # the FULL ranking (loaded with n=None below)
 LOOKBACK = 6                                  # trailing months for the spread average
 N_QUINTILES = C.N_QUINTILES
 DECADE_START = C.DECADE_START                 # 2016-01-01, the project "past decade" cut-off
@@ -226,9 +226,9 @@ def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[di
     """The always-on and spread-timed :func:`regression.render_alpha_table` rows for
     one factor.  The gross (cost-free) L/S Sharpe and β-neutral Sharpe come from the
     always-on / timed book unchanged; the combined "Sharpe net cost" column carries
-    this experiment's after-cost (net) raw and β-neutral Sharpe.  Alpha and industry
-    β are the gross book's, matching every other experiment's table (cost is shown
-    via the net-of-cost Sharpe and the average-cost column, not netted from α)."""
+    this experiment's after-cost (net) raw and β-neutral Sharpe.  Alpha is the gross
+    book's, matching every other experiment's table (cost is shown via the
+    net-of-cost Sharpe and the average-cost column, not netted from α)."""
     rows = []
     for book, family in (("always_on", "always-on"), ("timed", "spread-timed")):
         sub = comparison[comparison["book"] == book].set_index("window")
@@ -236,13 +236,11 @@ def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[di
         rows.append({
             "factor": factor, "family": family, "direction": direction,
             "alpha": full["gross_alpha"], "alpha_tstat": full["gross_alpha_tstat"],
-            "beta": full["ind_beta"], "beta_tstat": full["ind_beta_tstat"],
             "sharpe": full["gross_sharpe"], "sharpe_neutral": full["sharpe_neutral"],
             "sharpe_cost": full["net_sharpe"],
             "sharpe_cost_neutral": full["net_sharpe_neutral"],
             "avg_cost_pp": full["avg_cost"] * 100.0, "n": int(full["n_months"]),
             "alpha_2016": dec["gross_alpha"], "alpha_tstat_2016": dec["gross_alpha_tstat"],
-            "beta_2016": dec["ind_beta"], "beta_tstat_2016": dec["ind_beta_tstat"],
             "sharpe_2016": dec["gross_sharpe"], "sharpe_neutral_2016": dec["sharpe_neutral"],
             "sharpe_cost_2016": dec["net_sharpe"],
             "sharpe_cost_neutral_2016": dec["net_sharpe_neutral"],
@@ -261,7 +259,7 @@ def _pick(comparison: pd.DataFrame, book: str, window: str, col: str) -> float:
 def run(csv_path: Path = CANDIDATES_CSV, out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
     """Test every ranked factor under the spread-timing rule and write the single
     consolidated performance table."""
-    candidates = FM.load_top_factors(csv_path)
+    candidates = FM.load_top_factors(csv_path, n=None)   # every ranked factor, not just the top-5
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("=== Experiment 4: factor-spread timing of every ranked factor ===")

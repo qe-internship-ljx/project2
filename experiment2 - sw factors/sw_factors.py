@@ -148,8 +148,8 @@ USE_CANONICAL_LS_DIRECTION = True
 # --------------------------------------------------------------------------- #
 # Universe -- SINGLE SOURCE OF TRUTH for Experiment 2
 # --------------------------------------------------------------------------- #
-# Every Experiment 2 software factor library (this module plus the RD/, Skew/,
-# Rev & Cost/ and Stability/ subexperiments) trades the *same* Software & Services
+# Every Experiment 2 software factor library (this module plus the RD/, Skew/
+# and Stability/ subexperiments) trades the *same* Software & Services
 # cross-section and applies the *same* market-cap screen -- they differ only in
 # where they write.  So the cross-section definition and the screen live here once
 # and the subexperiments build their universe from ``software_universe`` (loading

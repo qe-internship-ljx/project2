@@ -8,9 +8,8 @@ mean), and write a tidy monthly panel to ``Stability/factor_panel.csv``.
 
 This module, its driver and its outputs all live in experiment2's
 ``Stability/`` subfolder.  It is one of Experiment 2's factor libraries
-(alongside ``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/``,
-``revcost_factors.py`` -> ``Rev & Cost/`` and ``skew_factors.py`` ->
-``Skew/``).  Like the others it is a **drop-in for
+(alongside ``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/``
+and ``skew_factors.py`` -> ``Skew/``).  Like the others it is a **drop-in for
 Experiment 1's analysis engine**: the quintile sorts, cross-sectional
 (Fama-MacBeth) regressions, long/short books, trading-cost model and every plot
 are reused **verbatim** from
@@ -28,20 +27,36 @@ of R&D intensity -- i.e. a *second moment* (consistency), not a level.  This
 module pushes that idea across the quality complex: stable, predictable
 fundamentals are a recognised quality dimension (Dichev & Tang 2009, "earnings
 volatility and future earnings"; Graham, Harvey & Rajgopal 2005 on smoothing).
-It scores the consistency of cash generation, of gross profitability, and of the
-return stream.  Steady, low-volatility franchises are rewarded with a lower cost
-of capital and tend to outperform on a risk-adjusted basis.
+It scores the consistency of revenue growth, of cash generation, of gross
+profitability, and of the return stream.  Steady, low-volatility franchises are
+rewarded with a lower cost of capital and tend to outperform on a risk-adjusted
+basis.
 
     name                              definition                                                        dir         dimension
     --------------------------------  ----------------------------------------------------------------  ----------  -----------
+    revenue_stability                 - trailing 36m std of YoY revenue growth                          long high   revenue durability (2nd moment)
     cashflow_stability                - trailing 12m coeff. of variation of OCF margin                  long high   cash-generation consistency
     return_stability                  - trailing 12m coeff. of variation of monthly return              long high   return consistency (low-vol)
     gross_profitability_stability     - trailing 12m coeff. of variation of GP/assets                   long high   gross-profitability consistency
 
-All three factors are *level*-consistency signals and use a **trailing 12-month**
-window: a short window makes each score a *current* read on consistency and
-maximises scorable stock-months at the front of each name's history.
+``cashflow_stability`` / ``return_stability`` / ``gross_profitability_stability``
+are *level*-consistency signals and use a **trailing 12-month** window: a short
+window makes each score a *current* read on consistency and maximises scorable
+stock-months at the front of each name's history.  ``revenue_stability`` is a
+*growth*-consistency signal (the dispersion of the top-line growth *rate*, not of
+a level), so it uses a longer **trailing 36-month** window over the YoY growth
+series -- a plain standard deviation rather than a coefficient of variation,
+because YoY growth is already scale-free.
 
+* ``revenue_stability`` is the negative trailing-36m standard deviation of YoY
+  revenue growth, per stock.  High (near 0) => a smooth, predictable, recurring
+  (subscription-like) top line; low (very negative) => lumpy license/deal revenue
+  with renewal/air-pocket risk.  A second moment of the top line, so it is
+  orthogonal by construction to every level signal in the project.  Recurring
+  (subscription) revenue is smooth; lumpy license/deal revenue is not -- the
+  market rewards the *level/acceleration* of growth and under-weights its
+  *durability* (Asness-Frazzini-Pedersen "Quality minus Junk"; Novy-Marx earnings
+  stability).  Currency-neutral (a std of a within-firm growth *rate*).
 * ``cashflow_stability`` is the negative trailing-12m coefficient of variation of
   the operating cash-flow margin (``operating_cf_ltm / sales_ltm``).  It watches
   the consistency of *cash* generation -- harder to manage and a
@@ -164,6 +179,9 @@ INDUSTRY_GROUP = "Software & Services"
 STAB_WINDOW = 12            # trailing months for the level-consistency CoV moment
 STAB_MIN_PERIODS = 9        # require >=9 of the trailing 12 months before a score exists
                             # (~2/3-of-window coverage)
+YOY_LAG = 12                # year-over-year lag (months) for the revenue-growth series
+REV_STAB_WINDOW = 36        # trailing months for the revenue-growth stability moment
+REV_STAB_MIN_PERIODS = 24   # require >=2y of history before a revenue-stability score exists
 MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction of
                             # the trailing mean magnitude (mean|x|); below it the
                             # series oscillates around zero and the CoV is undefined.
@@ -177,6 +195,7 @@ MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction
 # in-sample t-stat), so a negative realised alpha t-stat means the factor worked
 # *against* the hypothesis -- exactly what we want for hypothesis testing.
 FACTORS: dict[str, dict] = {
+    "revenue_stability":     {"family": "Revenue stability (recurring-revenue durability)", "higher_is_bullish": True},
     "cashflow_stability":    {"family": "Cash-flow stability (OCF-margin consistency)",      "higher_is_bullish": True},
     "return_stability":      {"family": "Return stability (monthly-return consistency)",     "higher_is_bullish": True},
     "gross_profitability_stability": {"family": "Gross-profitability stability (GP/assets consistency)", "higher_is_bullish": True},
@@ -211,8 +230,9 @@ def universe_from_argv(default: Universe = SOFTWARE_SERVICES) -> Universe:
 def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     """
     Point-in-time monthly fundamentals carrying everything the stability factors
-    need: sales and LTM operating cash flow (for the OCF margin), and LTM gross
-    income and total assets (for gross profitability).
+    need: LTM sales (for revenue-growth stability and the OCF margin), LTM
+    operating cash flow (for the OCF margin), and LTM gross income and total
+    assets (for gross profitability).
 
     Each record carries ``observation_date`` (when the report became
     observable); we align on it in :func:`build_monthly_panel` via the shared
@@ -272,6 +292,16 @@ def build_monthly_panel(universe: pd.Index | None = None,
 # --------------------------------------------------------------------------- #
 # Building blocks
 # --------------------------------------------------------------------------- #
+def _yoy_growth(p: pd.DataFrame, s: pd.Series) -> pd.Series:
+    """Year-over-year growth (level_t / level_{t-12m} - 1) of a series, per stock.
+
+    The prior-year level is guarded to be strictly positive (``.where(prev > 0)``)
+    so the growth rate is well-defined and not dominated by sign flips / tiny
+    denominators; otherwise the observation is left missing."""
+    prev = s.groupby(p["stock_id"], observed=True).shift(YOY_LAG)
+    return s / prev.where(prev > 0.0) - 1.0
+
+
 def _ocf_margin_series(p: pd.DataFrame) -> pd.Series:
     """Operating cash-flow margin = LTM operating cash flow / LTM sales (sales
     must be positive).
@@ -338,6 +368,25 @@ def _neg_coeff_of_variation(p: pd.DataFrame, x: pd.Series,
 # --------------------------------------------------------------------------- #
 # Factor definitions
 # --------------------------------------------------------------------------- #
+def _f_revenue_stability(p: pd.DataFrame) -> pd.Series:
+    """
+    Recurring-revenue durability: the NEGATIVE trailing-36m standard deviation of
+    YoY revenue growth, per stock.  High (near 0) => a smooth, predictable,
+    recurring (subscription-like) top line; low (very negative) => lumpy
+    license/deal revenue with renewal/air-pocket risk.  A second moment of the top
+    line, so orthogonal by construction to every level signal in the project.  We
+    negate so that higher = more stable = the bullish (long) leg.  Unlike the other
+    members it measures the dispersion of a growth *rate* (already scale-free), so
+    it uses a plain standard deviation over a longer 36m window rather than the 12m
+    coefficient of variation.
+    """
+    g = _yoy_growth(p, p["sales_ltm"].astype(float))
+    g = g.replace([np.inf, -np.inf], np.nan)
+    std = (g.groupby(p["stock_id"], observed=True)
+            .transform(lambda s: s.rolling(REV_STAB_WINDOW, min_periods=REV_STAB_MIN_PERIODS).std()))
+    return -std
+
+
 def _f_cashflow_stability(p: pd.DataFrame) -> pd.Series:
     """
     Cash-flow stability: the negative trailing-12m robust coefficient of
@@ -381,6 +430,7 @@ def _f_gross_profitability_stability(p: pd.DataFrame) -> pd.Series:
 
 
 _FACTOR_FUNCS = {
+    "revenue_stability": _f_revenue_stability,
     "cashflow_stability": _f_cashflow_stability,
     "return_stability": _f_return_stability,
     "gross_profitability_stability": _f_gross_profitability_stability,

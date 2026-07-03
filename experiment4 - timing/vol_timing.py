@@ -25,9 +25,9 @@ itself a trade, the **turnover cost** of the timing overlay is charged explicitl
 compared to the always-on book on an after-cost basis, over the common sample for
 which the timing signal exists (VVIX history starts 2006-03).
 
-The candidate factors are exactly Experiment 2's top-factor hand-off
-(``experiment2 - sw factors/top_factors/top_factors.csv``), so re-running
-Experiment 2's ``collect`` step re-points this module automatically.
+The candidate factors are exactly the top five of Experiment 2's cross-experiment
+ranking (``experiment2 - sw factors/factor_ranking/monthly_quintile_ranked.csv``), so
+re-running Experiment 2's ``collect`` step re-points this module automatically.
 
 Engine reuse (the project's dependency-injection convention)
 ------------------------------------------------------------
@@ -82,7 +82,7 @@ F = C.F                      # the Experiment 1 engine, wired for the software u
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-TOP_FACTORS_CSV = C.TOP_FACTORS_CSV
+TOP_FACTORS_CSV = C.RANKED_CSV
 VVIX_SECURITY = "VVIX Index"
 VVIX_MA_WINDOW = 10          # trading-day moving-average window of VVIX
 VVIX_THRESHOLD = 95.0        # enter the book only when the 10d VVIX MA exceeds this
@@ -218,9 +218,9 @@ def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[di
     """The always-on and VVIX-timed :func:`regression.render_alpha_table` rows for
     one factor.  The gross (cost-free) L/S Sharpe and β-neutral Sharpe come from the
     always-on / timed book unchanged; the combined "Sharpe net cost" column carries
-    this experiment's after-cost (net) raw and β-neutral Sharpe.  Alpha and industry
-    β are the gross book's, matching every other experiment's table (cost is shown
-    via the net-of-cost Sharpe and the average-cost column, not netted from α)."""
+    this experiment's after-cost (net) raw and β-neutral Sharpe.  Alpha is the gross
+    book's, matching every other experiment's table (cost is shown via the
+    net-of-cost Sharpe and the average-cost column, not netted from α)."""
     rows = []
     for book, family in (("always_on", "always-on"), ("timed", "vol-timed")):
         sub = comparison[comparison["book"] == book].set_index("window")
@@ -228,13 +228,11 @@ def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[di
         rows.append({
             "factor": factor, "family": family, "direction": direction,
             "alpha": full["gross_alpha"], "alpha_tstat": full["gross_alpha_tstat"],
-            "beta": full["ind_beta"], "beta_tstat": full["ind_beta_tstat"],
             "sharpe": full["gross_sharpe"], "sharpe_neutral": full["sharpe_neutral"],
             "sharpe_cost": full["net_sharpe"],
             "sharpe_cost_neutral": full["net_sharpe_neutral"],
             "avg_cost_pp": full["avg_cost"] * 100.0, "n": int(full["n_months"]),
             "alpha_2016": dec["gross_alpha"], "alpha_tstat_2016": dec["gross_alpha_tstat"],
-            "beta_2016": dec["ind_beta"], "beta_tstat_2016": dec["ind_beta_tstat"],
             "sharpe_2016": dec["gross_sharpe"], "sharpe_neutral_2016": dec["sharpe_neutral"],
             "sharpe_cost_2016": dec["net_sharpe"],
             "sharpe_cost_neutral_2016": dec["net_sharpe_neutral"],

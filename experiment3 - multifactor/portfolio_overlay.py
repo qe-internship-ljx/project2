@@ -5,8 +5,9 @@ portfolio_overlay.py
 Experiment 3 -- equal-capital overlay of the top factors' univariate books.
 
 Take the five software-industry factors Experiment 2 ranks highest by
-industry-neutral alpha t-stat (the ``top_factors/top_factors.csv`` hand-off,
-retrieved exactly as ``factor_momentum.py`` does) and hold **all five standalone
+industry-neutral alpha t-stat (the top five of
+``factor_ranking/monthly_quintile_ranked.csv``, retrieved exactly as
+``factor_momentum.py`` does) and hold **all five standalone
 long/short books at once**, each on 1/5 of capital:
 
     overlay_t = mean over factors of (bullish-oriented Q5-Q1 spread)_t

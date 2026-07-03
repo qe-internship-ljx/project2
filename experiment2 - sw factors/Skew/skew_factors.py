@@ -7,10 +7,9 @@ universe, standardise each cross-sectionally (z-score vs the industry mean), and
 write a tidy monthly panel to ``Skew/factor_panel.csv``.
 
 This module, its driver and its outputs all live in experiment2's ``Skew/``
-subfolder.  It is a *sixth* factor library for Experiment 2 (alongside
-``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/``,
-``revcost_factors.py`` -> ``Rev & Cost/`` and ``stability_factors.py`` ->
-``Stability/``).  Like the others it is a **drop-in for Experiment 1's analysis
+subfolder.  It is another factor library for Experiment 2 (alongside
+``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/`` and
+``stability_factors.py`` -> ``Stability/``).  Like the others it is a **drop-in for Experiment 1's analysis
 engine**: the quintile sorts, cross-sectional (Fama-MacBeth) regressions,
 long/short books, trading-cost model and every plot are reused **verbatim** from
 ``experiment1 - general factors/{quintile,regression,cost}.py`` via the shared
@@ -279,8 +278,7 @@ def _yoy_growth(p: pd.DataFrame, s: pd.Series) -> pd.Series:
     """Year-over-year growth (level_t / level_{t-12m} - 1) of a series, per stock.
 
     The prior-year level is guarded strictly positive so the growth rate is well
-    defined; same convention as ``Rev & Cost/revcost_factors.py`` /
-    ``stability_factors.py``."""
+    defined; same convention as ``Stability/stability_factors.py``."""
     prev = s.groupby(p["stock_id"], observed=True).shift(YOY_LAG)
     return s / prev.where(prev > 0.0) - 1.0
 

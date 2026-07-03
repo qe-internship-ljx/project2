@@ -4,11 +4,11 @@ tertile.py
 
 Re-evaluate **every** factor tested on the Software & Services universe -- both
 Experiment 1's general market factors and every Experiment 2 software
-subexperiment (Standard, RD, Rev & Cost, Stability, Skew) -- with a
+subexperiment (Standard, RD, Stability, Skew) -- with a
 **tertile** long/short book (long the top third, short the bottom third) in
 place of the quintile (top / bottom fifth) book, then render the whole set in a
 single alpha table in the *same* format as
-``top_factors/top_factors_long_short_market_alpha.png``.
+``factor_ranking/monthly_quintile.png``.
 
 Only the *bucketing* changes.  Each factor's long/short **orientation** (which
 tail is the long leg) is a property of the factor, not of the number of buckets,
@@ -42,7 +42,7 @@ Experiment 1's ``factors`` / ``cost`` / ``regression`` straight off ``sys.path``
 
 Run standalone::
 
-    python tertile.py            # write top_factors/tertile_long_short_market_alpha.png
+    python tertile.py            # write factor_ranking/monthly_tertile.png
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ DECADE_START = regression.DECADE_START   # 2016+ ("past decade") window, shared
 # Experiment 2 software subexperiment); ``Cross_val/`` is likewise excluded -- it
 # re-tests factors on Banks+Insurance, a different universe.
 # --------------------------------------------------------------------------- #
-_EXP2_LIBS = ["Standard", "RD", "Rev & Cost", "Stability", "Skew"]
+_EXP2_LIBS = ["Standard", "RD", "Stability", "Skew"]
 
 
 def _source(label: str, panel: Path, alpha_csv: Path) -> dict:
@@ -96,7 +96,7 @@ SOURCES: list[dict] = [
     for lib in _EXP2_LIBS
 ]
 
-OUT_PNG = _THIS_DIR / "top_factors" / "tertile_long_short_market_alpha.png"
+OUT_PNG = _THIS_DIR / "factor_ranking" / "monthly_tertile.png"
 
 _TITLE = ("Long-short TERTILE strategy regressed on the industry return\n"
           "(long top third / short bottom third;  ls_t = α + β·industry_t "
@@ -138,31 +138,30 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
     mreg = regression.market_regression(spread, industry_ret)
     mreg_2016 = regression.market_regression(
         spread[recent], industry_ret[industry_ret.index >= DECADE_START])
-    sr_neutral = regression.beta_neutral_sharpe(spread, industry_ret, mreg["beta"])
-    sr_neutral_2016 = regression.beta_neutral_sharpe(
-        spread[recent], industry_ret[industry_ret.index >= DECADE_START],
-        mreg_2016["beta"])
+    # Beta-neutral Sharpe: hedge with a walk-forward -beta*industry overlay whose
+    # beta is re-estimated on an expanding, look-ahead-free window (the 2016+ figure
+    # windows the same hedged series, so its betas still use all prior history).
+    sr_neutral = regression.beta_neutral_sharpe(spread, industry_ret)
+    sr_neutral_2016 = regression.beta_neutral_sharpe(spread, industry_ret, start=DECADE_START)
     # Turnover cost of the tertile book: its mean (pp/month) plus the
     # cost-incorporated Sharpe (raw + beta-neutral, full & 2016+).
     cost_series = cost.long_short_cost(panel, factor, cost_panel, N_TERTILES)
     avg_cost_pp = cost.average_cost(cost_series) * 100.0
     sharpe_cost = regression.net_of_cost_sharpe(spread, cost_series)
     sharpe_cost_neutral = regression.net_of_cost_neutral_sharpe(
-        spread, cost_series, industry_ret, mreg["beta"])
+        spread, cost_series, industry_ret)
     sharpe_cost_2016 = regression.net_of_cost_sharpe(spread, cost_series, start=DECADE_START)
     sharpe_cost_neutral_2016 = regression.net_of_cost_neutral_sharpe(
-        spread, cost_series, industry_ret, mreg_2016["beta"], start=DECADE_START)
+        spread, cost_series, industry_ret, start=DECADE_START)
 
     return {
         "factor": factor, "family": family,
         "direction": "T3-T1" if sign > 0 else "T1-T3",
         "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
-        "beta": mreg["beta"], "beta_tstat": mreg["beta_tstat"],
         "sharpe": ls["sharpe"], "sharpe_neutral": sr_neutral,
         "sharpe_cost": sharpe_cost, "sharpe_cost_neutral": sharpe_cost_neutral,
         "avg_cost_pp": avg_cost_pp, "n": mreg["n"],
         "alpha_2016": mreg_2016["alpha"], "alpha_tstat_2016": mreg_2016["alpha_tstat"],
-        "beta_2016": mreg_2016["beta"], "beta_tstat_2016": mreg_2016["beta_tstat"],
         "sharpe_2016": ls_2016["sharpe"], "sharpe_neutral_2016": sr_neutral_2016,
         "sharpe_cost_2016": sharpe_cost_2016,
         "sharpe_cost_neutral_2016": sharpe_cost_neutral_2016,
@@ -220,7 +219,7 @@ def run() -> pd.DataFrame:
                   .reset_index(drop=True))
 
     # Render in the standard alpha-table format, tagging each family with its
-    # source subexperiment for provenance -- exactly like the top_factors PNG.
+    # source subexperiment for provenance -- exactly like the factor_ranking PNG.
     plot_rows = table.copy()
     plot_rows["family"] = plot_rows["family"] + "  [" + plot_rows["subexperiment"] + "]"
     OUT_PNG.parent.mkdir(parents=True, exist_ok=True)
