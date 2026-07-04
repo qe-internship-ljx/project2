@@ -70,7 +70,7 @@ labels.
 | Folder | Library | Factors |
 |---|---|---|
 | `Standard/` | `sw_factors.py` | `intangible_value`, `intangible_profitability`, `rd_productivity`, `buyback_quality`, `fscore`, `zscore` |
-| `RD/` | `rd_factors.py` | `rd_growth`, `rd_conversion`, `rd_stability`, `innovation_mix`, `rd_intensity` — see `RD/R&D factors.pdf`; `rd_stability` is the keeper |
+| `RD/` | `rd_factors.py` | `rd_growth`, `rd_conversion`, `rd_stability`, `innovation_mix`, `rd_intensity` — `rd_stability` is the keeper |
 | `Stability/` | `stability_factors.py` | second moments of quality: `revenue_stability`, `cashflow_stability`, `return_stability`, `gross_profitability_stability` |
 | `Skew/` | `skew_factors.py` | `return_skewness`, `revenue_growth_skewness`, `eps_skewness` (all long-low: lottery/lumpiness aversion) |
 | `Cross_val/` | `crossval_factors.py` | re-tests the top `TOP_N` ranked factors on the **Banks + Insurance + Commodity Producers** universe (excluded from the ranking — different cross-section) |
@@ -129,7 +129,7 @@ throughout Experiment 1 (the monthly analogue of the plan's "4 quarters").
 novel factors of the original proposal, the search for new signals now follows a
 focused direction — extrapolating the **R&D activity** software firms rely on
 (its growth, conversion into profit, consistency, and composition). That work
-lives in the sibling **`RD/`** library; see `RD/R&D factors.pdf`.
+lives in the sibling **`RD/`** library.
 
 ## Trading cost
 
