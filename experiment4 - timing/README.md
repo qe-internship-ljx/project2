@@ -26,15 +26,20 @@ For each candidate factor:
 2. **Cost.** `cost.turnover_cost` charges turnover on the factor's quarterly-held
    legs, passing the timing flag as the `active` mask so exits and re-entries are
    priced (a month spent in cash is free, but leaving and re-entering the book is not).
+   `cost.active_month_cost` then folds each run's exit-month liquidation back onto
+   the run's **last active month**, so the reported cost lives entirely on the
+   activated months — and a book entered and exited within a single month is charged
+   the full **round-trip (double) cost** on that one month.
 3. **Evaluation.** The timed book is scored over the full sample and 2016+ on the
-   common sample (months where both the return and the signal are defined):
-   gross and net-of-cost mean / t-stat / Sharpe, industry-neutral alpha, and the
-   walk-forward beta-neutral Sharpe (`composite.book_stats`; the hedge β is
-   re-estimated on an expanding, look-ahead-free window). The timed book's
-   **alpha regression and beta-neutral Sharpe run over in-market months only** —
-   the exact-zero cash months would mechanically dilute the alpha and drag the
-   neutralised Sharpe below what a significant alpha implies (they thin the mean
-   but not the volatility); the raw mean/t/Sharpe still cover the full timed series.
+   common sample (months where both the return and the signal are defined). **Every
+   reported quantity — the raw Sharpe, the average cost, the net-of-cost Sharpe, the
+   industry-neutral alpha and the walk-forward beta-neutral Sharpe — is measured over
+   the activated (in-market) months only** (`composite.book_stats`; the hedge β is
+   re-estimated on an expanding, look-ahead-free window). The exact-zero cash months
+   are excluded throughout: including them would thin the mean but not the volatility,
+   mechanically diluting the alpha and dragging both the raw and neutralised Sharpe
+   below what a significant alpha implies. The `n` column is thus the count of
+   activated months, and `% activation` is their share of the common sample.
 4. **Output.** One consolidated alpha table with a row per factor (the timed
    book): `output/spread_timing_performance.png` and
    `output/vol_timing_performance.png`.

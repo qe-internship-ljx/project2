@@ -35,13 +35,6 @@ larger, less extreme slice of the cross-section (~1/4 of names per corner rather
 than ~1/9).  Reporting both lets us see whether the double sort's edge comes from
 the extreme tertile corners or survives the milder, higher-capacity median split.
 
-Default factors -- ``return_stability`` (Experiment 2 Stability library, monthly-
-return consistency) and ``gross_profitability`` (Experiment 1 general factors,
-profitability/quality).  Both are ``Q5-Q1`` factors (long the high-z names), so
-each is oriented +1; the orientation is read from each factor's standalone
-``long_short_market_alpha.csv`` ``direction`` exactly as ``composite.py`` does,
-so any pair of factors from the project's libraries can be double-sorted.
-
 Design -- reuses composite.py wholesale
 ---------------------------------------
 Nothing generic is re-implemented.  The constituent loading and bullish
@@ -64,8 +57,8 @@ The two selection rules each get their own subfolder of parallel files:
                                 tertile cell, each cell also labelled with its
                                 time-average market cap and number of names
         tertile/performance.png     the book's mean / t / Sharpe / industry-neutral
-                                alpha / alpha above the gross_profitability &
-                                revenue_stability books (with t-stats) / largest
+                                alpha / alpha above each of the pair's own two
+                                standalone factor books (with t-stats) / largest
                                 single-name ownership for a $100M dollar-neutral book
                                 / avg cost
     half/                       the half-intersection (median double-sort) rule's own
@@ -76,7 +69,6 @@ The two selection rules each get their own subfolder of parallel files:
 Run standalone::
 
     python bivariate_gate.py                                   # default pair
-    python bivariate_gate.py return_stability gross_profitability
 """
 
 from __future__ import annotations
@@ -98,7 +90,7 @@ F, R = C.F, C.R
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_FACTORS = ["return_stability", "gross_profitability"]
+DEFAULT_FACTORS = ["revenue_stability", "gross_profitability"]
 N_TILES = 3                                  # tertiles
 TOP, BOTTOM = N_TILES, 1                      # top / bottom tertile labels
 TCOLS = [f"T{i}" for i in range(1, N_TILES + 1)]
@@ -107,12 +99,13 @@ HALF_TOP, HALF_BOTTOM = N_HALVES, 1           # top / bottom half labels
 OUTPUT_DIR = C.OUTPUT_DIR
 DECADE_START = C.DECADE_START                # "past decade" cut-off (2016+), project convention
 
-# Standalone long/short books the double-sort return is benchmarked against: the
-# strategy is regressed on each one to measure the alpha it earns *above* that
-# book (does the double sort add return beyond simply holding these factors?).
-# Both resolve through composite's library catalog (gross_profitability lives in
-# Experiment 1, revenue_stability in Experiment 2's Stability library).
-BENCHMARK_FACTORS = ["gross_profitability", "revenue_stability"]
+# The double-sort return is benchmarked against *its own two constituents*: the
+# strategy is regressed on each standalone factor book to measure the alpha it
+# earns *above* that book (does the double sort add return beyond simply holding
+# either factor it is built from?).  The benchmark pair is therefore the run's
+# own ``factor_names`` -- so ``return_stability x gross_profitability`` measures
+# alpha above univariate return_stability, not an unrelated book -- mirroring
+# Experiment 5's ``capacity_scaling`` rather than a fixed global list.
 
 # The capital assumption behind the largest-single-name ownership row lives in
 # composite.py (``PORTFOLIO_CAPITAL`` / ``LEG_CAPITAL``); the ownership itself is
@@ -339,10 +332,11 @@ def evaluate_book(spread: pd.Series, cost_series: pd.Series, industry: pd.Series
     return windows, full, decade
 
 
-def _benchmark_extra_metrics() -> list[tuple[str, str, str, bool]]:
-    """``render_performance`` rows for the per-benchmark alpha / alpha t-stat."""
+def _benchmark_extra_metrics(benchmark_factors: list[str]) -> list[tuple[str, str, str, bool]]:
+    """``render_performance`` rows for the per-benchmark alpha / alpha t-stat, one
+    pair per benchmark factor (the run's own two constituents)."""
     extra: list[tuple[str, str, str, bool]] = []
-    for f in BENCHMARK_FACTORS:
+    for f in benchmark_factors:
         extra.append((f"α vs {f} book (monthly)", f"alpha_vs_{f}", "pct", False))
         extra.append((f"    α t-stat vs {f}", f"alpha_tstat_vs_{f}", "num", True))
     return extra
@@ -442,8 +436,12 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     #    (tile_a/tile_b) and into halves (half_a/half_b) for the two rules.
     frame = double_sorted(resolved)
     industry = C.industry_return()
-    benchmarks = {f: C.factor_long_short(f) for f in BENCHMARK_FACTORS}
-    extra_metrics = _benchmark_extra_metrics() + [C.ownership_metric()]
+    # Benchmark the double sort against its own two constituents (see the module
+    # note above), so the "alpha above univariate" is measured for exactly the
+    # two factors this book is built from rather than a fixed global pair.
+    benchmark_factors = list(factor_names)
+    benchmarks = {f: C.factor_long_short(f) for f in benchmark_factors}
+    extra_metrics = _benchmark_extra_metrics(benchmark_factors) + [C.ownership_metric()]
 
     # 2a. Tertile-corner rule: long top tertile of both / short bottom of both.
     book = bivariate_book(frame)
@@ -516,7 +514,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
           f"(t={full['tstat']:+.2f}, Sharpe={full['sharpe']:+.2f})")
     print(f"  industry-neutral alpha: {full['alpha']:+.4%}/mo "
           f"(t={full['alpha_tstat']:+.2f}, ind beta={full['ind_beta']:+.2f})")
-    for f in BENCHMARK_FACTORS:
+    for f in benchmark_factors:
         print(f"  alpha vs {f} book: {full[f'alpha_vs_{f}']:+.4%}/mo "
               f"(t={full[f'alpha_tstat_vs_{f}']:+.2f})")
     print(f"  2016+: alpha={decade['alpha']:+.4%}/mo (t={decade['alpha_tstat']:+.2f})")
@@ -527,7 +525,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
           f"(t={hfull['tstat']:+.2f}, Sharpe={hfull['sharpe']:+.2f})")
     print(f"  industry-neutral alpha: {hfull['alpha']:+.4%}/mo "
           f"(t={hfull['alpha_tstat']:+.2f}, ind beta={hfull['ind_beta']:+.2f})")
-    for f in BENCHMARK_FACTORS:
+    for f in benchmark_factors:
         print(f"  alpha vs {f} book: {hfull[f'alpha_vs_{f}']:+.4%}/mo "
               f"(t={hfull[f'alpha_tstat_vs_{f}']:+.2f})")
     print(f"  2016+: alpha={hdecade['alpha']:+.4%}/mo (t={hdecade['alpha_tstat']:+.2f})")

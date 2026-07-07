@@ -91,7 +91,7 @@ F = C.F                      # the Experiment 1 engine, wired for the software u
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-LOOKBACK = 6                                  # trailing months for the spread average
+LOOKBACK = 12                                  # trailing months for the spread average
 N_QUINTILES = C.N_QUINTILES
 DECADE_START = C.DECADE_START                 # 2016-01-01, the project "past decade" cut-off
 OUTPUT_DIR = _THIS_DIR / "output"
@@ -159,10 +159,13 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
     Returns the tidy ``comparison`` stats table (one row per window): the gross
     (cost-free) mean / t / Sharpe / industry-neutral alpha & beta, and the
     net-of-cost (after-cost) counterparts, plus the average turnover cost and the
-    fraction of months in market.  The market-alpha regression (gross and net) is
-    estimated over the in-market months only, so the timed book's alpha is not
-    diluted by the exact-zero cash months; mean / t / Sharpe still cover the full
-    timed series including those months.
+    fraction of months in market.  **Every quantity -- the raw Sharpe, the average
+    cost and the net-of-cost Sharpe included -- is measured over the activated
+    (in-market) months only**; the exact-zero cash months are excluded so they
+    neither dilute the mean nor shrink alpha / beta.  The activated-month cost folds
+    each run's exit-month liquidation back onto the run's last active month
+    (:func:`cost.active_month_cost`), so a book entered and exited within a single
+    month is discounted by the full round-trip (double) cost on that month.
     """
     gross = FM.signed_spread(panel, factor, direction)                # bullish quarterly Q5-Q1 book
     spread = value_spread(panel, factor)
@@ -190,16 +193,21 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
 
     rows = []
     for book, (gross_s, cost_s, active_s) in books.items():
-        net_s = gross_s - cost_s
-        # The market-alpha regression AND the beta-neutral Sharpe use only the
-        # in-market months: an out-of-market month is cash (an exact 0 with no
-        # industry exposure), so including it would mechanically shrink alpha and
-        # beta toward zero and drag the neutralised Sharpe below what a significant
-        # alpha implies (the zero months dilute the mean but not the volatility).
-        reg_gross, reg_net = gross_s[active_s], net_s[active_s]
+        # Everything is measured over the **activated months only**.  An out-of-market
+        # month is cash (an exact 0 with no industry exposure), so including it would
+        # dilute the mean, shrink alpha / beta toward zero, and drag the (neutral and
+        # raw) Sharpe below what a significant alpha implies.  The activated series is
+        # also where the true trading cost belongs: :func:`cost.active_month_cost`
+        # folds each run's exit-month liquidation back onto its last active month, so a
+        # book entered and exited within a single month pays the full round-trip
+        # (double) cost on that one activated month.
+        act_gross = gross_s[active_s]
+        act_cost = COST.active_month_cost(cost_s, active_s)
+        act_net = act_gross - act_cost
+        reg_gross, reg_net = act_gross, act_net
         for win_name, start in WINDOWS:
-            sg = C.book_stats(gross_s, industry, start=start)
-            sn = C.book_stats(net_s, industry, start=start)
+            sg = C.book_stats(act_gross, industry, start=start)
+            sn = C.book_stats(act_net, industry, start=start)
             rg = C.book_stats(reg_gross, industry, start=start)
             rn = C.book_stats(reg_net, industry, start=start)
             rows.append({
@@ -209,7 +217,7 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
                 "gross_alpha_tstat": rg["alpha_tstat"],
                 "ind_beta": rg["ind_beta"], "ind_beta_tstat": rg["ind_beta_tstat"],
                 "sharpe_neutral": rg["sharpe_neutral"],
-                "avg_cost": float(_win(cost_s, start).mean()),
+                "avg_cost": float(_win(act_cost, start).mean()),
                 "net_mean": sn["mean_monthly"], "net_tstat": sn["tstat"],
                 "net_sharpe": sn["sharpe"], "net_alpha": rn["alpha"],
                 "net_alpha_tstat": rn["alpha_tstat"],

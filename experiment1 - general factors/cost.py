@@ -213,6 +213,35 @@ def average_cost(cost_series: pd.Series) -> float:
     return float(cost_series.dropna().mean())
 
 
+def active_month_cost(cost_series: pd.Series, active: pd.Series) -> pd.Series:
+    """Fold a timing overlay's turnover cost onto its **activated months only**.
+
+    An ``active``-masked :func:`turnover_cost` series charges the book's *entry*
+    (establish / reposition) cost on the activated month it happens, but charges the
+    *exit* (full liquidation) cost on the following **inactive** cash month -- the
+    month the book goes flat.  When performance is measured over the activated months
+    alone, that exit cost would silently vanish and a book that is entered and exited
+    within a single month would be charged only the one-way entry, not the true
+    round-trip.
+
+    This helper shifts each inactive month's cost back onto the immediately preceding
+    month and returns the result **restricted to the activated months**.  So the last
+    active month of every run absorbs the liquidation cost of exiting it, and an
+    isolated single-month hold (enter, then exit the next month) pays *double* the
+    cost -- the full round trip -- on that one activated month, exactly as intended.
+
+    ``cost_series`` and ``active`` are aligned on the same monthly index (the common
+    evaluation sample); ``active`` is the boolean in-market flag.
+    """
+    active = active.reindex(cost_series.index, fill_value=False).astype(bool)
+    cost = cost_series.fillna(0.0)
+    # Cost sitting on an inactive month is a liquidation of the run that just ended:
+    # move it back one month (onto that run's last active month).
+    exit_cost = cost.where(~active, 0.0).shift(-1).fillna(0.0)
+    folded = cost.where(active, 0.0) + exit_cost
+    return folded[active].rename(cost_series.name)
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
