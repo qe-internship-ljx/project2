@@ -10,14 +10,14 @@ Two roles
 1. **Experiment 2 driver** (:func:`main`).  Run the full factor pipeline on the
    **Software & Services** cross-section using the software-industry factors
    (``sw_factors.py``) instead of the general market factors, then every sibling
-   subexperiment (``RD/``, ``Stability/``, ``Skew/``) in its own subprocess, then
+   subexperiment (``rd/``, ``stability/``, ``skew/``) in its own subprocess, then
    collect every subexperiment's factors and render the leaders
    (:func:`collect_top_factors`).  Like Experiment 1's per-universe drivers this
    adds no new analytics -- it reuses Experiment 1's ``quintile.py`` /
    ``regression.py`` **unmodified** via dependency injection
    (``driver_utils.wire_engine`` binds ``factors`` -> ``sw_factors`` before
    importing them, so their ``F`` resolves to the software factors with zero
-   changes to Experiment 1).  Results land in ``Standard/`` mirroring the
+   changes to Experiment 1).  Results land in ``standard/`` mirroring the
    Experiment 1 layout one-for-one.
 
 2. **The monthly re-evaluation** (:func:`run` / :func:`run_all`).  Re-evaluate
@@ -44,7 +44,7 @@ only repositioned quarterly.  Everything that is not about the repositioning
 frequency lives here and is imported by it:
 
   * :data:`SOURCES` -- the single source-of-truth factor universe (Experiment 1's
-    general factors + every Experiment 2 software subexperiment; ``Cross_val/`` is
+    general factors + every Experiment 2 software subexperiment; ``cross_val/`` is
     excluded, being a different universe);
   * the generic engine wiring (``factors`` / ``cost`` / ``regression`` off
     ``sys.path`` -- the panel-driven engine, not a per-library injection);
@@ -131,7 +131,7 @@ def dir_label(sign: int, n: int) -> str:
 # Sources -- one ``quintile/long_short_market_alpha.csv`` (for the factor list,
 # family label and recorded orientation) + its ``factor_panel.csv`` (to rebuild the
 # books) per Software & Services factor library: Experiment 1's general factors
-# first, then every Experiment 2 software subexperiment.  ``Cross_val/`` is excluded
+# first, then every Experiment 2 software subexperiment.  ``cross_val/`` is excluded
 # -- it re-tests factors on Banks+Insurance, a different universe.  This is the
 # single source of truth for "the tested factor set"; ``quarter_position.py`` and
 # ``experiment5 .../capacity_scaling.py`` import it by path.
@@ -150,12 +150,12 @@ SOURCES: list[dict] = [
             / "long_short_market_alpha.csv"),
 ] + [
     _source(lib,
-            _THIS_DIR / lib / "factor_panel.csv",
-            _THIS_DIR / lib / "quintile" / "long_short_market_alpha.csv")
+            _THIS_DIR / lib.lower() / "factor_panel.csv",
+            _THIS_DIR / lib.lower() / "quintile" / "long_short_market_alpha.csv")
     for lib in _EXP2_LIBS
 ]
 
-FACTOR_RANKING_DIR = _THIS_DIR / "factor_ranking"
+FACTOR_RANKING_DIR = _THIS_DIR / "Factor Ranking"
 
 
 def _load_panel(path: Path) -> pd.DataFrame:
@@ -266,7 +266,7 @@ def evaluate_all(evaluate_factor, n: int) -> pd.DataFrame:
 def render_ranked(table: pd.DataFrame, out_png: Path, title: str | None = None) -> None:
     """Render a ranked factor table in the standard alpha-table format, tagging each
     family with its source subexperiment for provenance -- exactly like the monthly /
-    quarterly / factor_ranking PNGs.  Shared with ``quarter_position.py``."""
+    quarterly / Factor Ranking PNGs.  Shared with ``quarter_position.py``."""
     plot_rows = table.copy()
     plot_rows["family"] = plot_rows["family"] + "  [" + plot_rows["subexperiment"] + "]"
     out_png.parent.mkdir(parents=True, exist_ok=True)
@@ -358,9 +358,9 @@ def run_all() -> dict[str, pd.DataFrame]:
 # does; those module-level bindings are cached per process, so the subexperiments
 # cannot share one interpreter -- we run each as its own subprocess.
 _SUBEXPERIMENTS = [
-    _THIS_DIR / "RD" / "main_rd.py",
-    _THIS_DIR / "Stability" / "main_stability.py",
-    _THIS_DIR / "Skew" / "main_skew.py",
+    _THIS_DIR / "rd" / "main_rd.py",
+    _THIS_DIR / "stability" / "main_stability.py",
+    _THIS_DIR / "skew" / "main_skew.py",
 ]
 
 
@@ -398,7 +398,7 @@ def collect_top_factors(top_n: int = TOP_N) -> pd.DataFrame:
     Experiment 1's general market factors are included in the ranking -- they are
     *also* tested on the Software & Services universe (as the ``General`` source),
     directly comparable, same cross-section and same alpha definition.
-    ``Cross_val/`` is excluded (a different universe; see :data:`SOURCES`).
+    ``cross_val/`` is excluded (a different universe; see :data:`SOURCES`).
     """
     top = run_all()["quintile"].head(top_n).copy()
     print(f"\n=== Top {top_n} factors across subexperiments "

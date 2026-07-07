@@ -6,7 +6,7 @@ Experiment 2 driver for the **cross-validation** library (``crossval_factors.py`
 re-test Experiment 2's **top ``TOP_N`` factors** (the leaders of the
 quarterly-repositioned ranking ``quarter_position.ranked_factors``, resolved to their
 source libraries) on the **Banks + Insurance + Commodity Producers** universe, using
-the *same pipeline* as the ``Stability/`` subfolder.
+the *same pipeline* as the ``stability/`` subfolder.
 
 Same wiring as every Experiment 2 driver (shared in ``../driver_utils.py``):
 Experiment 1's ``quintile.py`` / ``regression.py`` / ``cost.py`` bind to their
@@ -15,10 +15,10 @@ registers ``crossval_factors`` under that name in ``sys.modules`` *before*
 importing them, so the entire analysis -- quintile sorts, cross-sectional
 (Fama-MacBeth) regressions, dollar-neutral long/short books, industry-neutral
 alpha and average turnover cost -- runs against the cross-validated top factors
-with zero changes to Experiment 1.  Outputs land directly in this ``Cross_val/``
+with zero changes to Experiment 1.  Outputs land directly in this ``cross_val/``
 folder, mirroring the Experiment 1 / Experiment 2 layout one-for-one::
 
-    Cross_val/
+    cross_val/
       factor_panel.csv
       quintile/    <factor>/...   + long_short_market_alpha.{csv,png}
       regression/  <factor>/...   + summary.csv + summary_table.png
@@ -40,7 +40,7 @@ Redundancy comparison
 The ``factor_correlation`` step is run **vs the Experiment 1 general market factors
 built on this same combined universe** -- built on demand by
 ``crossval_factors.build_general_market_panel`` (reusing Experiment 1's engine) and
-cached under ``Cross_val/general_market/factor_panel.csv``.  Only a same-universe
+cached under ``cross_val/general_market/factor_panel.csv``.  Only a same-universe
 general-factor table is a valid redundancy benchmark, so the panel must share this
 universe's cross-section.  (A top factor that *is* an Experiment 1 general factor --
 e.g. ``gross_profitability`` -- is trivially explained by itself in this table; its

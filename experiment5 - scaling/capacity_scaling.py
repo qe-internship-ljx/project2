@@ -37,13 +37,13 @@ Bivariate extension (Experiment 3's double sort)
 ------------------------------------------------
 The single-factor books above sqrt-cap-weight the top / bottom **quintile** legs.
 :func:`run_bivariate` applies the *same* sqrt(market-cap) within-leg tilt to
-**Experiment 3's bivariate tertile double sort** (``bivariate_tertile.py``), which
+**Experiment 3's bivariate gate double sort** (``bivariate_gate.py``), which
 longs the T3xT3 corner (top tertile of *both* factors) and shorts the T1xT1
 corner.  Only the within-corner weighting changes from equal to sqrt-cap; the
 double sort, orientation, benchmark books, industry-neutral alpha and every
 downstream statistic are the Experiment 3 driver's own (reused by path), so the
 rendered table reads directly against that experiment's equal-weighted
-``bivariate_tertile/<slug>/performance.png``.  It writes a single performance
+``bivariate_gate/<slug>/tertile/performance.png``.  It writes a single performance
 table per factor pair, grouped under ``output/capacity_scaling/bivariate_scaled/``.
 
 Composite extension (Experiment 3's composite z-score sort)
@@ -149,7 +149,7 @@ _load_panel = _qp._load_panel
 # side-effect free (its own ``run()`` is guarded by ``__main__``).
 _EXP3_DIR = _PROJECT_ROOT / "experiment3 - multifactor"
 sys.path.insert(0, str(_EXP3_DIR))
-_bivariate = _load_by_path("exp3_bivariate_tertile", _EXP3_DIR / "bivariate_tertile.py")
+_bivariate = _load_by_path("exp3_bivariate_gate", _EXP3_DIR / "bivariate_gate.py")
 
 N_QUINTILES = 5
 DECADE_START = regression.DECADE_START     # 2016+ ("past decade") window, shared
@@ -367,9 +367,9 @@ def run(raw_weight, title: str, out_png: Path, label: str) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
-# Capacity scaling applied to Experiment 3's bivariate tertile double sort
+# Capacity scaling applied to Experiment 3's bivariate gate double sort
 #
-# Experiment 3's ``bivariate_tertile.py`` longs the T3xT3 corner (top tertile of
+# Experiment 3's ``bivariate_gate.py`` longs the T3xT3 corner (top tertile of
 # *both* factors) and shorts the T1xT1 corner, equal-weighted within each corner.
 # Here we apply the SAME sqrt(market-cap) within-leg tilt used above for the
 # quintile books to those two corner legs, changing nothing else -- the double
@@ -398,7 +398,7 @@ def corner_legs(frame: pd.DataFrame, col_a: str, col_b: str, top, bottom,
     to one inside its corner each month.
 
     The oriented tertile buckets (``col_a``/``col_b``) and the formation USD market
-    cap (``mcap``) both come from ``bivariate_tertile.double_sorted``; only the
+    cap (``mcap``) both come from ``bivariate_gate.double_sorted``; only the
     within-corner weighting differs from Experiment 3's equal-weighted corner book.
     Names whose weight is not finite and positive cannot be sized and drop out."""
     long_cell = frame.loc[(frame[col_a] == top) & (frame[col_b] == top)].assign(leg="long")
@@ -432,7 +432,7 @@ def corner_ownership(legs: pd.DataFrame, leg_capital: float | None = None) -> pd
     the per-leg capital) and its ownership share is that over its formation market
     cap (``mcap``).  Returns the per-month max across both corners -- the most
     concentrated single position held -- the sqrt-cap analog of
-    ``bivariate_tertile._intersection_ownership``'s equal-weighted share."""
+    ``bivariate_gate._intersection_ownership``'s equal-weighted share."""
     leg_capital = _C.LEG_CAPITAL if leg_capital is None else leg_capital
     share = (leg_capital * legs["w"]) / legs["mcap"]
     return share.groupby(legs["date"]).max().sort_index()
@@ -443,10 +443,10 @@ def run_bivariate(factor_names: list[str] | None = None,
                   label: str | None = None,
                   out_root: Path | None = None) -> dict:
     """Apply the sqrt(market-cap) within-leg tilt to Experiment 3's bivariate
-    tertile double sort for the two ``factor_names`` (default: the driver's own
+    gate double sort for the two ``factor_names`` (default: the driver's own
     ``return_stability x gross_profitability`` pair) and render a single
     performance table -- the *same* format and metrics as
-    ``experiment3 .../bivariate_tertile/<slug>/performance.png`` -- as
+    ``experiment3 .../bivariate_gate/<slug>/tertile/performance.png`` -- as
     ``output/capacity_scaling/bivariate_scaled/<slug>_performance.png``.  Returns
     the per-window stats dict."""
     factor_names = list(factor_names) if factor_names else list(_bivariate.DEFAULT_FACTORS)

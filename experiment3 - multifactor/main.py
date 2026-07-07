@@ -12,7 +12,7 @@ Each pipeline lives in its own module and already runs standalone via
 
     composite.py           straight-sum (equal-weight) z-score composite L/S
     weighted_composite.py  regression-premia-weighted composite L/S
-    bivariate_tertile.py   double-sorted (tertile x tertile) intersection book
+    bivariate_gate.py      double-sorted (tertile x tertile) intersection book
     factor_momentum.py     time-series factor momentum / rotation across the top factors
     portfolio_overlay.py   equal-capital overlay of the top factors' univariate books
 
@@ -22,7 +22,7 @@ standalone pipeline.
 
 Like Experiment 2's ``main.py``, this adds no new analytics -- it just invokes
 each module's own ``main`` with its default factor set (plus a second
-``bivariate_tertile.py`` run for the revenue_stability x gross_profitability
+``bivariate_gate.py`` run for the revenue_stability x gross_profitability
 pair, so that book is refreshed alongside the default one).  Each module wires
 Experiment 1's engine into ``sys.modules`` at import time (via ``composite``),
 so to keep every run pristine and isolated -- and to match the documented
@@ -53,14 +53,14 @@ _THIS_DIR = Path(__file__).resolve().parent
 # Every runnable pipeline in dependency-agnostic logical order (each is isolated
 # in its own subprocess, so ordering is for readability, not correctness).  Each
 # entry is the full argv after the interpreter: module path plus any CLI args.
-# ``bivariate_tertile.py`` runs twice -- its default pair, then the
+# ``bivariate_gate.py`` runs twice -- its default pair, then the
 # revenue_stability pair -- so both books stay current with pipeline changes.
 # ``factor_correlation.py`` has no ``main`` and is excluded by design.
 _PIPELINES = [
     [_THIS_DIR / "composite.py"],
     [_THIS_DIR / "weighted_composite.py"],
-    [_THIS_DIR / "bivariate_tertile.py"],
-    [_THIS_DIR / "bivariate_tertile.py", "revenue_stability", "gross_profitability"],
+    [_THIS_DIR / "bivariate_gate.py"],
+    [_THIS_DIR / "bivariate_gate.py", "revenue_stability", "gross_profitability"],
     [_THIS_DIR / "factor_momentum.py"],
     [_THIS_DIR / "portfolio_overlay.py"],
 ]

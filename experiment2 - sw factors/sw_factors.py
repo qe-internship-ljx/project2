@@ -5,7 +5,7 @@ sw_factors.py
 Compute the **established software-industry factors** of the project plan
 (section 2.2) on the GICS *Software & Services* universe, standardise each cross-
 sectionally (z-score relative to the industry mean), and write a tidy monthly
-panel to ``Standard/factor_panel.csv``.
+panel to ``standard/factor_panel.csv``.
 
 This is Experiment 2.  It is a *drop-in factor library* for Experiment 1's
 analysis machinery: the heavy lifting -- quintile sorts, cross-sectional
@@ -40,7 +40,7 @@ financially stronger / less distress-prone firm), so the established-quality
 literature is represented alongside the software-specific signals.
 
 The search for genuinely new software-industry factors (plan section 3.2) is
-pursued separately in the R&D-behaviour extension (``RD/``), which extrapolates
+pursued separately in the R&D-behaviour extension (``rd/``), which extrapolates
 the R&D activity software firms rely on rather than the two ad-hoc novel factors
 of the original proposal.
 
@@ -114,7 +114,7 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # Paths & configuration
 # --------------------------------------------------------------------------- #
-OUTPUT_DIR = Path(__file__).resolve().parent / "Standard"
+OUTPUT_DIR = Path(__file__).resolve().parent / "standard"
 
 INDUSTRY_GROUP = "Software & Services"
 
@@ -148,8 +148,8 @@ USE_CANONICAL_LS_DIRECTION = True
 # --------------------------------------------------------------------------- #
 # Universe -- SINGLE SOURCE OF TRUTH for Experiment 2
 # --------------------------------------------------------------------------- #
-# Every Experiment 2 software factor library (this module plus the RD/, Skew/
-# and Stability/ subexperiments) trades the *same* Software & Services
+# Every Experiment 2 software factor library (this module plus the rd/, skew/
+# and stability/ subexperiments) trades the *same* Software & Services
 # cross-section and applies the *same* market-cap screen -- they differ only in
 # where they write.  So the cross-section definition and the screen live here once
 # and the subexperiments build their universe from ``software_universe`` (loading
@@ -177,8 +177,8 @@ def software_universe(output_dir: Path) -> Universe:
     )
 
 
-# This module writes to Standard/; outputs mirror the Experiment 1 layout
-# one-for-one: Standard/{factor_panel.csv, quintile/..., regression/...}.
+# This module writes to standard/; outputs mirror the Experiment 1 layout
+# one-for-one: standard/{factor_panel.csv, quintile/..., regression/...}.
 SOFTWARE_SERVICES = software_universe(OUTPUT_DIR)
 
 UNIVERSES: dict[str, Universe] = {SOFTWARE_SERVICES.slug: SOFTWARE_SERVICES}

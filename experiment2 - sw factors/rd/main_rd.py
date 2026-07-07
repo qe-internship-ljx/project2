@@ -11,10 +11,10 @@ registers ``rd_factors`` under that name in ``sys.modules`` *before* importing
 them, so the entire analysis -- even-quintile sorts, cross-sectional
 (Fama-MacBeth) regressions, dollar-neutral long/short books, industry-neutral
 alpha and average turnover cost -- runs against the R&D factors with zero
-changes to Experiment 1.  Outputs land directly in this ``RD/`` folder,
+changes to Experiment 1.  Outputs land directly in this ``rd/`` folder,
 mirroring the Experiment 1 / Experiment 2 layout one-for-one::
 
-    RD/
+    rd/
       factor_panel.csv
       quintile/    <factor>/...
                                   + long_short_market_alpha.{csv,png}

@@ -1,8 +1,8 @@
 """
-bivariate_tertile.py
-=====================
+bivariate_gate.py
+=================
 
-Experiment 3 -- bivariate (independent double-sort) tertile long/short.
+Experiment 3 -- bivariate (independent double-sort) gate long/short.
 
 Combine **two** factors not by aggregating them into one score (the
 ``composite.py`` route) but by an *independent double sort*: the industry
@@ -56,24 +56,27 @@ winsorisation is ``factors.winsorize_cross_section`` -- the identical tail
 treatment every other long-short leg and the industry benchmark receive.  This
 module adds **only** the double-sort intersection and its grid diagnostic.
 
-Outputs (``output/bivariate_tertile/<slug>/``)
-----------------------------------------------
-    grid_mean_return.png        3x3 heatmap: mean next-month return of each tertile cell,
-                                each cell also labelled with its time-average market cap
-                                and number of names
-    performance.png             the book's mean / t / Sharpe / industry-neutral alpha /
-                                alpha above the gross_profitability & revenue_stability
-                                books (with t-stats) / largest single-name ownership
-                                for a $100M dollar-neutral book / avg cost
-    half/                       the half-intersection (median double-sort) rule's
-                                own outputs, mirroring the tertile files above:
-        half/grid_mean_return.png   2x2 counterpart of grid_mean_return.png
+Outputs (``output/bivariate_gate/<slug>/``)
+-------------------------------------------
+The two selection rules each get their own subfolder of parallel files:
+    tertile/                    the tertile-corner (3x3) rule's outputs:
+        tertile/grid_mean_return.png    3x3 heatmap: mean next-month return of each
+                                tertile cell, each cell also labelled with its
+                                time-average market cap and number of names
+        tertile/performance.png     the book's mean / t / Sharpe / industry-neutral
+                                alpha / alpha above the gross_profitability &
+                                revenue_stability books (with t-stats) / largest
+                                single-name ownership for a $100M dollar-neutral book
+                                / avg cost
+    half/                       the half-intersection (median double-sort) rule's own
+                                outputs, mirroring the tertile files above:
+        half/grid_mean_return.png   2x2 counterpart of tertile/grid_mean_return.png
         half/performance.png        the book's performance table
 
 Run standalone::
 
-    python bivariate_tertile.py                                   # default pair
-    python bivariate_tertile.py return_stability gross_profitability
+    python bivariate_gate.py                                   # default pair
+    python bivariate_gate.py return_stability gross_profitability
 """
 
 from __future__ import annotations
@@ -417,21 +420,21 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
         label: str | None = None,
         out_root: Path = OUTPUT_DIR) -> dict:
     """
-    Run the bivariate-tertile double sort for the two ``factor_names`` and write
-    every output under ``out_root / "bivariate_tertile" / <slug>``.  ``label``
+    Run the bivariate-gate double sort for the two ``factor_names`` and write
+    every output under ``out_root / "bivariate_gate" / <slug>``.  ``label``
     overrides the slug (default: the factor names joined by ``__``).  Returns the
     per-window performance dict.
     """
     if len(factor_names) != 2:
-        raise ValueError("bivariate_tertile takes exactly two factors; got "
+        raise ValueError("bivariate_gate takes exactly two factors; got "
                          f"{len(factor_names)}: {factor_names}")
 
     resolved = C.resolve_factors(factor_names)
     slug = label or "__".join(factor_names)
-    out_dir = out_root / "bivariate_tertile" / slug
+    out_dir = out_root / "bivariate_gate" / slug
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=== Experiment 3: bivariate tertile (independent double-sort) L/S ===")
+    print("=== Experiment 3: bivariate gate (independent double-sort) L/S ===")
     print(f"Factors: " + ", ".join(f"{r.factor} [{'+' if r.sign > 0 else '-'}]"
                                     for r in resolved.itertuples()))
 
@@ -465,8 +468,10 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
              "n_months": int(hfull["n_months"]),
              "start": hspread.index.min(), "end": hspread.index.max()}
 
-    # --- Persist outputs (tertile corners) --------------------------------- #
-    plot_grid(grids, factor_names, out_dir / "grid_mean_return.png")
+    # --- Persist outputs (tertile corners, grouped in its own subfolder) ---- #
+    tertile_dir = out_dir / "tertile"
+    tertile_dir.mkdir(parents=True, exist_ok=True)
+    plot_grid(grids, factor_names, tertile_dir / "grid_mean_return.png")
     C.render_performance(
         windows, "Bivariate tertile long-short (top-of-both - bottom-of-both) performance",
         f"{_pair_label(factor_names)}   |   {meta['n_stocks']} stocks over "
@@ -476,7 +481,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
         "industry return   |   "
         "benchmark alphas from regressing the book on each standalone factor book   |   "
         "Shading: |t| >= 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png",
+        tertile_dir / "performance.png",
         extra_metrics=extra_metrics)
 
     # --- Persist outputs (half intersection, grouped in its own subfolder) -- #

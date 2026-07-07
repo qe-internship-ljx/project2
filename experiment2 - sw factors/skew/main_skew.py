@@ -11,10 +11,10 @@ registers ``skew_factors`` under that name in ``sys.modules`` *before*
 importing them, so the entire analysis -- quintile sorts, cross-sectional
 (Fama-MacBeth) regressions, dollar-neutral long/short books, industry-neutral
 alpha and average turnover cost -- runs against the skewness factors with zero
-changes to Experiment 1.  Outputs land directly in this ``Skew/`` folder,
+changes to Experiment 1.  Outputs land directly in this ``skew/`` folder,
 mirroring the Experiment 1 / Experiment 2 layout one-for-one::
 
-    Skew/
+    skew/
       factor_panel.csv
       quintile/    <factor>/...
                                   + long_short_market_alpha.{csv,png}

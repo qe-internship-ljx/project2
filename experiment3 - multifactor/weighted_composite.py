@@ -76,7 +76,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import composite as C
-import bivariate_tertile as BT         # reused benchmark-relative alpha estimator
+import bivariate_gate as BT            # reused benchmark-relative alpha estimator
 from composite import F, R             # reused engine + analysis handles
 
 # --------------------------------------------------------------------------- #
@@ -248,7 +248,7 @@ def plot_paths(beta_path: pd.DataFrame, tstat_path: pd.DataFrame,
 def _benchmark_extra_metrics(factor_names: list[str]) -> list[tuple[str, str, str, bool]]:
     """``render_performance`` rows for the alpha (+ t-stat) the weighted book earns
     above each constituent's standalone factor book -- keyed to match
-    :func:`bivariate_tertile.benchmark_alphas`' ``alpha_vs_<f>`` output."""
+    :func:`bivariate_gate.benchmark_alphas`' ``alpha_vs_<f>`` output."""
     extra: list[tuple[str, str, str, bool]] = []
     for f in factor_names:
         extra.append((f"α vs {f} book (monthly)", f"alpha_vs_{f}", "pct", False))
@@ -312,7 +312,7 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     C.attach_ownership(stats, C.leg_ownership(legs))
     # Alpha the walk-forward book earns *above* each constituent's standalone factor
     # book -- does weighting the constituents add return beyond simply holding them?
-    # (same benchmark-relative estimator bivariate_tertile uses; regressed only over
+    # (same benchmark-relative estimator bivariate_gate uses; regressed only over
     # the overlapping OOS months since market_regression inner-joins on the index).
     benchmarks = {f: C.factor_long_short(f) for f in factor_names}
     stats.update(BT.benchmark_alphas(spread, benchmarks))

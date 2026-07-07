@@ -52,12 +52,12 @@ Alongside the one-factor-at-a-time rotation, this module also tests *combining*
 the momentum winners.  **Every 3 months** it ranks the candidates by their
 **trailing-12-month univariate long/short return** (the same realised,
 look-ahead-free window the rotation selects on), takes the **top two**, and
-jointly generates a portfolio from them via ``bivariate_tertile``'s
+jointly generates a portfolio from them via ``bivariate_gate``'s
 independent double sort (long the top-tertile-of-both / short the
 bottom-tertile-of-both).  The chosen pair is re-selected every 3 months and its
 double sort rebalanced monthly in between, so the book is the corner spread of
 whichever pair momentum favours -- the double-sort mechanics (tertiles, corner legs, grid, turnover cost)
-are reused wholesale from ``bivariate_tertile``; this module adds only the 3-monthly
+are reused wholesale from ``bivariate_gate``; this module adds only the 3-monthly
 pair selection.  The 3x3 grid diagnostic averages each cell over all months regardless
 of which pair produced it (rows = tertile on the block's #1 momentum factor,
 columns = tertile on its #2).
@@ -90,7 +90,7 @@ import numpy as np
 import pandas as pd
 
 import composite as C                 # engine + analysis plumbing, loaded by path
-import bivariate_tertile as BT         # double-sort pipeline reused for the top-two pair
+import bivariate_gate as BG            # double-sort pipeline reused for the top-two pair
 
 # --------------------------------------------------------------------------- #
 # Paths / configuration
@@ -398,12 +398,12 @@ def rotating_double_sort(pairs: pd.Series) -> pd.DataFrame:
     One combined double-sorted cross-section in which each formation month uses
     that month's chosen top-two pair.
 
-    ``bivariate_tertile.double_sorted`` is run once per distinct pair (giving that
+    ``bivariate_gate.double_sorted`` is run once per distinct pair (giving that
     pair's per-month tertile labels ``tile_a`` on the #1 momentum factor / ``tile_b``
     on the #2), and only the months that pair is selected are kept.  Stacking these
     slices yields a frame with the standard ``date, stock_id, next_return, mcap,
     tile_a, tile_b`` columns whose tiles are always oriented to the month's momentum
-    ranks -- so ``bivariate_tertile``'s :func:`bivariate_book`, :func:`grid_stats`
+    ranks -- so ``bivariate_gate``'s :func:`bivariate_book`, :func:`grid_stats`
     and :func:`bivariate_cost` all apply unchanged.
     """
     keep = ["date", "stock_id", "next_return", "mcap", "tile_a", "tile_b"]
@@ -413,17 +413,17 @@ def rotating_double_sort(pairs: pd.Series) -> pd.DataFrame:
 
     slices = []
     for pair, months in months_of_pair.items():
-        frame = BT.double_sorted(C.resolve_factors(list(pair)))
+        frame = BG.double_sorted(C.resolve_factors(list(pair)))
         slices.append(frame.loc[frame["date"].isin(months), keep])
     return pd.concat(slices, ignore_index=True).sort_values(["date", "stock_id"])
 
 
 def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
     """Re-select the two strongest trailing-12m univariate factors *every 3 months*
-    and combine them with ``bivariate_tertile``'s independent double sort (rebalanced
+    and combine them with ``bivariate_gate``'s independent double sort (rebalanced
     monthly between selections), writing the rotating book's outputs under ``out_dir``.
     Only the 3-monthly pair selection lives here; the double-sort mechanics and
-    diagnostics are reused from ``bivariate_tertile``.  Returns the per-window
+    diagnostics are reused from ``bivariate_gate``.  Returns the per-window
     performance dict."""
     out_dir.mkdir(parents=True, exist_ok=True)
     print("--- bivariate double sort (3-monthly top two by trailing-12m univariate return) ---")
@@ -431,8 +431,8 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
     # 1. 3-monthly pair selection, then the rotating double-sorted cross-section.
     pairs = held_top_pairs(spreads)
     frame = rotating_double_sort(pairs)
-    book = BT.bivariate_book(frame)                  # rotating corner spread per month
-    grids = BT.grid_stats(frame)                     # cells averaged across all months/pairs
+    book = BG.bivariate_book(frame)                  # rotating corner spread per month
+    grids = BG.grid_stats(frame)                     # cells averaged across all months/pairs
     spread = book["long_short"]
 
     # 2. Performance vs the industry, exactly as every project book is measured.
@@ -445,7 +445,7 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
     # Average monthly turnover cost of the rotating book (reported, not netted); the
     # pair switching is genuine turnover the double-sort cost routine already charges.
     # Same series also nets the spread for the cost-incorporated Sharpe.
-    cost_series = BT.bivariate_cost(frame)
+    cost_series = BG.bivariate_cost(frame)
     full["avg_cost"] = C.window_cost(cost_series)
     decade["avg_cost"] = C.window_cost(cost_series, start=DECADE_START)
     C.attach_net_cost_sharpe(full, spread, cost_series, industry)
@@ -453,7 +453,7 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
 
     # Largest single-name ownership for a $100M dollar-neutral book (worst case per
     # window), from the rotating double sort's corner-cell legs.
-    ownership = BT.bivariate_ownership(frame)
+    ownership = BG.bivariate_ownership(frame)
     C.attach_ownership(full, ownership)
     C.attach_ownership(decade, ownership, start=DECADE_START)
 
@@ -462,7 +462,7 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
     pair_counts = (held.apply(lambda p: f"{p[0]} x {p[1]}")
                        .value_counts().rename_axis("pair").rename("months").to_frame())
 
-    BT.plot_grid(grids, BIVARIATE_AXES, out_dir / "grid_mean_return.png")
+    BG.plot_grid(grids, BIVARIATE_AXES, out_dir / "grid_mean_return.png")
     C.render_performance(
         windows, "Bivariate factor-momentum double sort: long-short performance",
         "every 3 months double-sort the trailing-12m top two factors (long top-tertile-of-both / "

@@ -98,35 +98,9 @@ EXP1_DIR = PROJECT_ROOT / "experiment1 - general factors"
 EXP2_DIR = PROJECT_ROOT / "experiment2 - sw factors"
 OUTPUT_DIR = EXP3_DIR / "output"
 
-# Factor libraries that can supply a constituent.  Each contributes a tidy panel
-# (date, stock_id, factor, value, zscore, next_return) carrying the exposures and
-# an alpha table whose ``direction`` column records each factor's bullish sign.
-# A requested factor is resolved against these in order (first match wins), so
-# its source -- panel and orientation -- is always unambiguous.  The list spans
-# every Software & Services factor library (Experiment 1's general factors plus
-# all of Experiment 2's software subexperiments), so any factor in Experiment 2's
-# top-factor hand-off resolves.  ``Cross_val/`` is omitted: it lives on the
-# Banks+Insurance universe, a different cross-section.
-def _exp2_lib(folder: str, label: str) -> dict:
-    return {"label": label,
-            "panel": EXP2_DIR / folder / "factor_panel.csv",
-            "alpha": EXP2_DIR / folder / "quintile" / "long_short_market_alpha.csv"}
-
-
-LIBRARIES: list[dict] = [
-    {"label": "general market factors",
-     "panel": EXP1_DIR / "output" / "software" / "factor_panel.csv",
-     "alpha": EXP1_DIR / "output" / "software" / "quintile" / "long_short_market_alpha.csv"},
-    _exp2_lib("Standard", "software-industry factors"),
-    _exp2_lib("RD", "R&D-behaviour factors"),
-    _exp2_lib("Rev & Cost", "revenue/cost factors"),
-    _exp2_lib("Stability", "stability factors"),
-    _exp2_lib("Skew", "skew factors"),
-]
-
 # The single factor-selection hand-off is Experiment 2's *quarterly-repositioned*
 # ranking, which ``quarter_position.ranked_factors`` reads from the CSV Experiment 2
-# persists (``factor_ranking/quarter_{label}_ranked.csv``): the top-N consumers slice
+# persists (``Factor Ranking/quarter_{label}_ranked.csv``): the top-N consumers slice
 # its leaders, while modules that sweep the whole candidate set (e.g. Experiment 4's
 # timing overlays) read every row.  Re-exported here as :func:`ranked_factors` so
 # Experiment 3-5 modules that already import ``composite`` reach it without importing
@@ -201,6 +175,22 @@ import cost as COST                       # registered by _load_exp1; the turnov
 # just registered above, so the generic engine is shared (no re-load).
 QP = _load("exp2_quarter_position", EXP2_DIR / "quarter_position.py")
 
+# Factor libraries that can supply a constituent.  Each contributes a tidy panel
+# (date, stock_id, factor, value, zscore, next_return) carrying the exposures and
+# an alpha table whose ``direction`` column records each factor's bullish sign.
+# A requested factor is resolved against these in order (first match wins), so its
+# source -- panel and orientation -- is always unambiguous.  The roster is exactly
+# Experiment 2's own factor-universe source-of-truth (``quarter_position.SOURCES``,
+# spanning Experiment 1's general factors plus every Experiment 2 software factor
+# library), reused wholesale so Experiment 3 never reaches into Experiment 2's
+# internal subfolders itself and any factor in the top-factor hand-off resolves.
+# The Banks+Insurance cross-validation library is excluded there: a different
+# cross-section.
+LIBRARIES: list[dict] = [
+    {"label": src["label"], "panel": src["panel"], "alpha": src["alpha_csv"]}
+    for src in QP.SOURCES
+]
+
 
 def ranked_factors(n: int | None = None, label: str = "quintile") -> pd.DataFrame:
     """The quarterly-repositioned factor-selection hand-off -- a thin re-export of
@@ -267,7 +257,7 @@ def factor_long_short(factor: str) -> pd.Series:
     months), oriented by its bullish ``sign`` -- the exact quarterly dollar-neutral
     book every other Experiment 2-5 book now trades, so it is the natural benchmark
     to regress another strategy against.  Shared by ``factor_momentum.py`` (rotation
-    candidates) and ``bivariate_tertile.py`` / ``weighted_composite.py``
+    candidates) and ``bivariate_gate.py`` / ``weighted_composite.py``
     (benchmark-relative alpha).
     """
     meta = resolve_factors([factor]).iloc[0]

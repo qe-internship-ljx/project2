@@ -39,7 +39,7 @@ via the shared engine in ``experiment1 - general factors/factors.py``.  The only
 things that change relative to the software subexperiments are (a) the factor set
 (the top-``TOP_N`` hand-off, resolved to their source libraries) and (b) the
 **universe**: this library runs on the ``BANKS_COMMODITY`` universe (Banks +
-Insurance + Commodity Producers), writing to the ``Cross_val/`` folder.
+Insurance + Commodity Producers), writing to the ``cross_val/`` folder.
 
 Direction / sign
 ----------------
@@ -122,14 +122,14 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # Paths & configuration
 # --------------------------------------------------------------------------- #
-# This module lives in (and writes to) experiment2's Cross_val/ subfolder, so the
-# cross-validation outputs land in their own subtree (Cross_val/{factor_panel.csv,
+# This module lives in (and writes to) experiment2's cross_val/ subfolder, so the
+# cross-validation outputs land in their own subtree (cross_val/{factor_panel.csv,
 # quintile/, regression/, factor_correlation/}) and never collide with the
 # software-universe libraries.
 OUTPUT_DIR = Path(__file__).resolve().parent
 
 # Experiment 2's factor-selection hand-off is the *quarterly*-repositioned ranking
-# ``quarter_position.py`` persists to ``factor_ranking/quarter_{label}_ranked.csv``.
+# ``quarter_position.py`` persists to ``Factor Ranking/quarter_{label}_ranked.csv``.
 # We test its top-N leaders -- read straight from the quintile CSV, sliced the same
 # way Experiment 3 slices it.  (This module lives in Experiment 2, beside the
 # ranking's producer, so it reads its CSV directly rather than importing Experiment
@@ -143,9 +143,9 @@ USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
-# Factor ranking -> the factor set (sliced the same way Experiment 3 slices it)
+# Factor Ranking -> the factor set (sliced the same way Experiment 3 slices it)
 # --------------------------------------------------------------------------- #
-_RANKED_CSV = _EXP2_DIR / "factor_ranking" / "quarter_quintile_ranked.csv"
+_RANKED_CSV = _EXP2_DIR / "Factor Ranking" / "quarter_quintile_ranked.csv"
 
 
 def load_top_factors(n: int = TOP_N) -> pd.DataFrame:
@@ -155,7 +155,7 @@ def load_top_factors(n: int = TOP_N) -> pd.DataFrame:
     ``family``.
 
     Read straight from the CSV ``quarter_position.run`` persists
-    (``factor_ranking/quarter_quintile_ranked.csv``, the hand-off
+    (``Factor Ranking/quarter_quintile_ranked.csv``, the hand-off
     ``quarter_position.ranked_factors`` also reads).  Reading the ranking rather than
     recomputing it means this driver -- which injects *this* cross-validation library
     under the ``factors`` / ``cost`` / ``regression`` names -- never has to load the
@@ -271,9 +271,9 @@ def build_general_market_panel(rebuild: bool = False) -> Path:
 # value, zscore, next_return, weight) panel -- so we reuse the exact construct.
 _SOURCE_LIB_PATHS: dict[str, Path] = {
     "Standard":   _EXP2_DIR / "sw_factors.py",
-    "RD":         _EXP2_DIR / "RD" / "rd_factors.py",
-    "Stability":  _EXP2_DIR / "Stability" / "stability_factors.py",
-    "Skew":       _EXP2_DIR / "Skew" / "skew_factors.py",
+    "RD":         _EXP2_DIR / "rd" / "rd_factors.py",
+    "Stability":  _EXP2_DIR / "stability" / "stability_factors.py",
+    "Skew":       _EXP2_DIR / "skew" / "skew_factors.py",
 }
 _LIB_CACHE: dict[str, object] = {}
 

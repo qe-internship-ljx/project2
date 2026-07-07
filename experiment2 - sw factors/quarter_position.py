@@ -21,7 +21,7 @@ Alongside the long/short books, this module also runs the **regression pipeline 
 each factor's next-quarter return is cross-sectionally regressed on its factor
 z-score, and the Fama-MacBeth t-stat of the resulting quarterly-alpha series is
 reported full period and 2016+, ranked by the sum of the two t-stats and rendered as
-a single PNG ``factor_ranking/quarter_regression.png`` (the quarterly counterpart of
+a single PNG ``Factor Ranking/quarter_regression.png`` (the quarterly counterpart of
 each subexperiment's ``regression/summary_table.png``).
 
 Where the monthly book re-sorts the whole cross-section every month, here new
@@ -81,12 +81,12 @@ The single downstream hand-off
 ------------------------------
 This module is also the **factor-selection hand-off** every downstream experiment
 reads.  Running it persists each bucketing's ranked table to
-``factor_ranking/quarter_{label}_ranked.csv`` (quintile / tertile / half), and
+``Factor Ranking/quarter_{label}_ranked.csv`` (quintile / tertile / half), and
 :func:`ranked_factors` reads that CSV back -- top-``n`` or the whole set -- so a
 downstream process resolves the leaders with a plain ``read_csv`` (no engine wiring,
 no whole-universe re-evaluation per process).  Experiments 3-5 slice their
 constituents from the *quarterly* book they will actually trade, and the
-``Cross_val/`` re-test reads the same CSV.  If the CSV is missing (this module was
+``cross_val/`` re-test reads the same CSV.  If the CSV is missing (this module was
 never run standalone) :func:`ranked_factors` falls back to computing and persisting
 it once, so the hand-off is self-bootstrapping.  Because the whole project now
 repositions quarterly, the per-factor
@@ -99,7 +99,7 @@ everywhere.
 
 Run standalone::
 
-    python quarter_position.py    # -> factor_ranking/quarter_{quintile,tertile,half}.png
+    python quarter_position.py    # -> Factor Ranking/quarter_{quintile,tertile,half}.png
                                   #    + quarter_{quintile,tertile,half}_ranked.csv
                                   #      (the persisted ranking every downstream experiment reads)
                                   #    + quarter_regression.png (quarterly cross-section regression)
@@ -175,20 +175,20 @@ def _title(bucket_word: str, top_leg: str) -> str:
 # experiment) reads back, instead of recomputing the whole-universe re-evaluation
 # in each process.
 def _ranked_csv(label: str) -> Path:
-    return _THIS_DIR / "factor_ranking" / f"quarter_{label}_ranked.csv"
+    return _THIS_DIR / "Factor Ranking" / f"quarter_{label}_ranked.csv"
 
 
 BUCKETINGS = [
     {"label": "quintile", "n": 5,
-     "out_png": _THIS_DIR / "factor_ranking" / "quarter_quintile.png",
+     "out_png": _THIS_DIR / "Factor Ranking" / "quarter_quintile.png",
      "ranked_csv": _ranked_csv("quintile"),
      "title": _title("quintile", "top fifth")},
     {"label": "tertile", "n": 3,
-     "out_png": _THIS_DIR / "factor_ranking" / "quarter_tertile.png",
+     "out_png": _THIS_DIR / "Factor Ranking" / "quarter_tertile.png",
      "ranked_csv": _ranked_csv("tertile"),
      "title": _title("tertile", "top third")},
     {"label": "half", "n": 2,
-     "out_png": _THIS_DIR / "factor_ranking" / "quarter_half.png",
+     "out_png": _THIS_DIR / "Factor Ranking" / "quarter_half.png",
      "ranked_csv": _ranked_csv("half"),
      "title": _title("half", "top half")},
 ]
@@ -468,7 +468,7 @@ def run(n: int, title: str, out_png: Path, label: str,
     table.to_csv(ranked_csv, index=False)
 
     # Render in the standard alpha-table format via the shared helper (family-tagged
-    # by source subexperiment, exactly like the monthly / factor_ranking PNGs).
+    # by source subexperiment, exactly like the monthly / Factor Ranking PNGs).
     _render_ranked(table, out_png, title)
 
     print(f"\nSaved quarterly-repositioned {label} long-short alpha table "
@@ -479,10 +479,10 @@ def run(n: int, title: str, out_png: Path, label: str,
 
 def ranked_factors(n: int | None = None, label: str = "quintile") -> pd.DataFrame:
     """The quarterly-repositioned factor ranking -- **the single hand-off** every
-    downstream experiment reads (Experiments 3-5 and ``Cross_val/``).
+    downstream experiment reads (Experiments 3-5 and ``cross_val/``).
 
     Reads the ranked table straight from the CSV ``run`` persisted
-    (``factor_ranking/quarter_{label}_ranked.csv``) -- so a downstream process resolves
+    (``Factor Ranking/quarter_{label}_ranked.csv``) -- so a downstream process resolves
     the leaders with a plain ``read_csv``, without re-running the whole-universe
     re-evaluation (no engine wiring needed).  If that CSV is missing (this module was
     never run standalone), it falls back to computing the ranking with :func:`rank`
@@ -505,7 +505,7 @@ def ranked_factors(n: int | None = None, label: str = "quintile") -> pd.DataFram
     return table if n is None else table.head(n).reset_index(drop=True)
 
 
-REGRESSION_PNG = _THIS_DIR / "factor_ranking" / "quarter_regression.png"
+REGRESSION_PNG = _THIS_DIR / "Factor Ranking" / "quarter_regression.png"
 
 
 def run_regression(out_png: Path = REGRESSION_PNG) -> pd.DataFrame:

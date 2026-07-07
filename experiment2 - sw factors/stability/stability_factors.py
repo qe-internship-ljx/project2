@@ -4,10 +4,10 @@ stability_factors.py
 
 Compute a set of **stability factors** for the GICS *Software &
 Services* universe, standardise each cross-sectionally (z-score vs the industry
-mean), and write a tidy monthly panel to ``Stability/factor_panel.csv``.
+mean), and write a tidy monthly panel to ``stability/factor_panel.csv``.
 
 This module, its driver and its outputs all live in experiment2's
-``Stability/`` subfolder.  It is one of Experiment 2's factor libraries
+``stability/`` subfolder.  It is one of Experiment 2's factor libraries
 (alongside ``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/``
 and ``skew_factors.py`` -> ``Skew/``).  Like the others it is a **drop-in for
 Experiment 1's analysis engine**: the quintile sorts, cross-sectional
@@ -16,7 +16,7 @@ are reused **verbatim** from
 ``experiment1 - general factors/{quintile,regression,cost}.py`` via the shared
 engine in ``experiment1 - general factors/factors.py``.  Only the *factor
 definitions* and the fundamentals they need are new here, and the universe's
-``output_dir`` is the ``Stability/`` folder itself, so these factors never
+``output_dir`` is the ``stability/`` folder itself, so these factors never
 collide with the other libraries.
 
 Motivation -- second moments of quality
@@ -166,10 +166,10 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # Paths & configuration
 # --------------------------------------------------------------------------- #
-# This module lives in (and writes to) experiment2's Stability/ subfolder, so
+# This module lives in (and writes to) experiment2's stability/ subfolder, so
 # these factors and their outputs live in their own subtree.  OUTPUT_DIR is the
-# Stability/ folder itself (the directory holding this file), so the analysis
-# outputs land directly under Stability/ (Stability/{factor_panel.csv,
+# stability/ folder itself (the directory holding this file), so the analysis
+# outputs land directly under stability/ (stability/{factor_panel.csv,
 # quintile/, regression/, factor_correlation/}).
 OUTPUT_DIR = Path(__file__).resolve().parent
 

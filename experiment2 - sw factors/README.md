@@ -6,6 +6,12 @@ Experiment 1** — even-quintile sorts and monthly cross-sectional (Fama–MacBe
 regressions, with the long/short book's Sharpe, industry-neutral alpha, and
 average turnover cost.
 
+> **All the key comprehensive results of Experiment 2 are stored in the
+> `factor_ranking/` directory** — the all-factor comparison tables (monthly and
+> quarterly × quintile/tertile/half), the quarterly cross-section regression, and
+> the persisted ranked-factor CSVs that Experiments 3–5 read as their factor
+> hand-off. Start there for the headline cross-factor comparison.
+
 > The standalone realized-dilution test was dropped per the updated project
 > proposal. The share-count change it measured is still used as one input to
 > `buyback_quality`. Four established factors remain, later joined by the

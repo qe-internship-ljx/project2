@@ -4,23 +4,23 @@ skew_factors.py
 
 Compute a set of **skewness factors** for the GICS *Software & Services*
 universe, standardise each cross-sectionally (z-score vs the industry mean), and
-write a tidy monthly panel to ``Skew/factor_panel.csv``.
+write a tidy monthly panel to ``skew/factor_panel.csv``.
 
-This module, its driver and its outputs all live in experiment2's ``Skew/``
+This module, its driver and its outputs all live in experiment2's ``skew/``
 subfolder.  It is another factor library for Experiment 2 (alongside
-``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/`` and
-``stability_factors.py`` -> ``Stability/``).  Like the others it is a **drop-in for Experiment 1's analysis
+``sw_factors.py`` -> ``standard/``, ``rd_factors.py`` -> ``RD/`` and
+``stability_factors.py`` -> ``stability/``).  Like the others it is a **drop-in for Experiment 1's analysis
 engine**: the quintile sorts, cross-sectional (Fama-MacBeth) regressions,
 long/short books, trading-cost model and every plot are reused **verbatim** from
 ``experiment1 - general factors/{quintile,regression,cost}.py`` via the shared
 engine in ``experiment1 - general factors/factors.py``.  Only the *factor
 definitions* and the fundamentals they need are new here, and the universe's
-``output_dir`` is the ``Skew/`` folder itself, so these factors never collide
+``output_dir`` is the ``skew/`` folder itself, so these factors never collide
 with the other libraries.
 
 Motivation -- third moments (skewness / lottery demand)
 -------------------------------------------------------
-Where the ``Stability/`` library captured *second* moments (consistency =
+Where the ``stability/`` library captured *second* moments (consistency =
 inverse volatility), this library captures the *third* moment, **skewness**.  A
 large body of work shows investors over-pay for positive skewness -- the
 "lottery" preference -- so assets with high expected positive skew earn *lower*
@@ -60,7 +60,7 @@ skew predicts *low* returns.
 
 All three are pure *shape* statistics -- standardised third moments -- and are
 therefore orthogonal by construction to every level / valuation signal and (being
-a moment one order up) largely orthogonal to the ``Stability/`` second-moment
+a moment one order up) largely orthogonal to the ``stability/`` second-moment
 factors.  Skewness is undefined for a constant series and noisy for short ones,
 so each requires :data:`SKEW_MIN_PERIODS` of trailing history before a score
 exists (same 36m window / >=2y minimum as the stability factors).
@@ -134,10 +134,10 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # Paths & configuration
 # --------------------------------------------------------------------------- #
-# This module lives in (and writes to) experiment2's Skew/ subfolder, so these
-# factors and their outputs live in their own subtree.  OUTPUT_DIR is the Skew/
+# This module lives in (and writes to) experiment2's skew/ subfolder, so these
+# factors and their outputs live in their own subtree.  OUTPUT_DIR is the skew/
 # folder itself (the directory holding this file), so the analysis outputs land
-# directly under Skew/ (Skew/{factor_panel.csv, quintile/, regression/,
+# directly under skew/ (skew/{factor_panel.csv, quintile/, regression/,
 # factor_correlation/}).
 OUTPUT_DIR = Path(__file__).resolve().parent
 
@@ -278,7 +278,7 @@ def _yoy_growth(p: pd.DataFrame, s: pd.Series) -> pd.Series:
     """Year-over-year growth (level_t / level_{t-12m} - 1) of a series, per stock.
 
     The prior-year level is guarded strictly positive so the growth rate is well
-    defined; same convention as ``Stability/stability_factors.py``."""
+    defined; same convention as ``stability/stability_factors.py``."""
     prev = s.groupby(p["stock_id"], observed=True).shift(YOY_LAG)
     return s / prev.where(prev > 0.0) - 1.0
 

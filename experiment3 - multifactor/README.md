@@ -30,7 +30,7 @@ Five ways to combine the factors, sharing one spine (plus the redundancy tool):
 |---|---|---|
 | [`composite.py`](composite.py) | equal-weighted z-score sum (signs `±1`), quarterly-repositioned quintile sort (plus a tertile variant for the tertile-ranked top-5 and a half variant for the half-ranked top-5) | full sample + past decade |
 | [`weighted_composite.py`](weighted_composite.py) | coefficient-weighted score — **expanding-window** regression premia, refit **quarterly** and held for the quarter | **walk-forward out-of-sample (2007+)** |
-| [`bivariate_tertile.py`](bivariate_tertile.py) | independent 3×3 **double sort** on two factors, repositioned quarterly — long T3∩T3, short T1∩T1 (plus a coarser median-split "half" rule) | full sample + past decade |
+| [`bivariate_gate.py`](bivariate_gate.py) | independent 3×3 **double sort** on two factors, repositioned quarterly — long T3∩T3, short T1∩T1 (plus a coarser median-split "half" rule) | full sample + past decade |
 | [`factor_momentum.py`](factor_momentum.py) | **rotation**: hold the factor (univariate) or double-sort the **top two** factors (bivariate) with the best trailing-12m quarterly book return — re-selected every 3 months | full sample + past decade |
 | [`portfolio_overlay.py`](portfolio_overlay.py) | equal-capital **overlay** of the top-5 standalone quarterly books (1/5 each, turnover netted per name across books) | full sample + past decade |
 | [`factor_correlation.py`](factor_correlation.py) | redundancy tool — R² of an industry factor on Experiment 1's general factors | — |
@@ -38,7 +38,7 @@ Five ways to combine the factors, sharing one spine (plus the redundancy tool):
 [`main.py`](main.py) orchestrates all five pipelines, each in its own
 subprocess (they share the dependency-injected Experiment 1 engine, so they must
 not share an interpreter), in dependency order: `composite` →
-`weighted_composite` → `bivariate_tertile` (twice: the default
+`weighted_composite` → `bivariate_gate` (twice: the default
 `return_stability × gross_profitability` pair, then
 `revenue_stability × gross_profitability`, so both books stay current) →
 `factor_momentum` → `portfolio_overlay`.
@@ -46,7 +46,7 @@ not share an interpreter), in dependency order: `composite` →
 The weighted variant is described under
 [Coefficient-weighted variant](#coefficient-weighted-variant-expanding-window-walk-forward--weighted_compositepy);
 the double sort, rotation and overlay under
-[Other combinations](#other-combinations--bivariate_tertilepy-factor_momentumpy-portfolio_overlaypy);
+[Other combinations](#other-combinations--bivariate_gatepy-factor_momentumpy-portfolio_overlaypy);
 the rest of this section covers the equal-weighted `composite.py`.
 
 ## What it does (`composite.py`)
@@ -117,8 +117,8 @@ python -c "from composite import run; run(['earnings_yield','sue','beta'])"
 python weighted_composite.py                                 # coefficient-weighted, expanding-window walk-forward
 python weighted_composite.py buyback_quality gross_profitability rd_stability
 
-python bivariate_tertile.py                                  # double sort, default pair (return_stability x gross_profitability)
-python bivariate_tertile.py revenue_stability gross_profitability
+python bivariate_gate.py                                     # double sort, default pair (return_stability x gross_profitability)
+python bivariate_gate.py revenue_stability gross_profitability
 python factor_momentum.py                                    # univariate rotation + bivariate top-two double sort
 python portfolio_overlay.py                                  # equal-capital overlay of the top-5 books
 ```
@@ -262,7 +262,7 @@ weights and t-stats over time — both series in one stacked figure) and
 constituent's standalone book). No quintile files are written — the sort is an
 internal step.
 
-## Other combinations — `bivariate_tertile.py`, `factor_momentum.py`, `portfolio_overlay.py`
+## Other combinations — `bivariate_gate.py`, `factor_momentum.py`, `portfolio_overlay.py`
 
 All three reuse `composite.py`'s spine (`resolve_factors` / `load_exposures`,
 `industry_return`, `book_stats`, `attach_net_cost_sharpe`, `leg_ownership` /
@@ -270,16 +270,17 @@ All three reuse `composite.py`'s spine (`resolve_factors` / `load_exposures`,
 net-of-cost Sharpe and the largest single-name ownership (for a $100M book) are
 defined identically to every other book in the project.
 
-**`bivariate_tertile.py` — independent double sort.** Every month the
+**`bivariate_gate.py` — independent double sort.** Every month the
 cross-section is split into three equal-count tertiles on each of two factors
 (default pair: `return_stability` × `gross_profitability`); the book is long the
 T3∩T3 corner and short the T1∩T1 corner, equal-weighted within each leg. A
 coarser **half-intersection** rule (median split, ~1/4 of names per corner
 instead of ~1/9) is reported alongside to show whether the edge survives a
 milder, higher-capacity cut. Outputs land under
-`output/bivariate_tertile/<slug>/` (`grid_mean_return.png` 3×3 heatmap and
-`performance.png` — including alpha over each constituent's standalone book and
-single-name ownership for a $100M book — plus a `half/` mirror).
+`output/bivariate_gate/<slug>/` in two parallel subfolders — `tertile/`
+(`grid_mean_return.png` 3×3 heatmap and `performance.png` — including alpha over
+each constituent's standalone book and single-name ownership for a $100M book)
+and its `half/` mirror.
 
 **`factor_momentum.py` — rotation across the top factors.** Two pipelines over
 the top five of Experiment 2's quarterly-repositioned `ranked_factors` hand-off,
@@ -288,7 +289,7 @@ each candidate book being that factor's quarterly Q5−Q1 spread:
 earned the most over the trailing 12 months (all realised, look-ahead-free) and
 hold it until the next selection;
 *bivariate* — every 3 months take the trailing-12m **top two** factors and trade
-their `bivariate_tertile` double sort, re-selecting the pair every 3 months. Outputs
+their `bivariate_gate` double sort, re-selecting the pair every 3 months. Outputs
 land under `output/factor_momentum/{univariate,bivariate}/` (cumulative growth,
 selection timeline / grid diagnostic, `performance.png`).
 

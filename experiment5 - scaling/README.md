@@ -41,7 +41,7 @@ output/capacity_scaling/univariate_scaled/log6_long_short_market_alpha.png   # l
 
 **Bivariate (`run_bivariate`).** Applies the sqrt weighting to Experiment 3's
 double-sort corners: the T3∩T3 / T1∩T1 legs come from
-`bivariate_tertile.double_sorted` (imported by path), sqrt-cap-weighted within
+`bivariate_gate.double_sorted` (imported by path), sqrt-cap-weighted within
 each corner. Default pairs: `return_stability × gross_profitability` and
 `revenue_stability × gross_profitability` (or pass pairs on the CLI). Each pair
 is benchmarked against its constituents' standalone books and reports the
@@ -68,7 +68,7 @@ output/capacity_scaling/composite_scaled/quarter_tertile_performance.png    # te
 
 Experiment 1's `factors` / `cost` / `regression` are imported off `sys.path`
 (the generic engine, no library injection); Experiment 2's `quarter_position.py`
-and Experiment 3's `bivariate_tertile.py` / `composite.py` are loaded by file path
+and Experiment 3's `bivariate_gate.py` / `composite.py` are loaded by file path
 for the factor universe, the double-sort mechanics and the composite construction.
 This experiment adds **only** the within-leg weighting schemes.
 

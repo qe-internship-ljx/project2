@@ -75,7 +75,7 @@ def run_correlation_analysis(library, universe, label: str,
     valid benchmark for every software-universe library); a library on a
     different universe passes its own same-universe benchmark -- a path or a
     zero-argument callable returning one, built only when this step runs
-    (see ``Cross_val/main_crossval.py``).
+    (see ``cross_val/main_crossval.py``).
     """
     fc = load_factor_correlation()
 
@@ -109,7 +109,7 @@ def run_pipeline(library, universe, label: str, quintile, regression, *,
     ``label`` is the singular noun used in headings (e.g. ``"R&D factor"`` ->
     "Building R&D factor panel", "R&D factors vs existing factors").
     ``panel_report(panel)`` may print extra lines under the build report
-    (e.g. Cross_val's per-factor coverage counts).  Returns the built panel.
+    (e.g. cross_val's per-factor coverage counts).  Returns the built panel.
     """
     scope = (f"industry group: {universe.industry_group}" if universe.industry_group
              else ", ".join(universe.industries) if universe.industries

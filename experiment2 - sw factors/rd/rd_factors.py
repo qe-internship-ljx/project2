@@ -4,9 +4,9 @@ rd_factors.py
 
 Compute a set of **R&D-behavior factors** for the GICS *Software & Services*
 universe, standardise each cross-sectionally (z-score vs the industry mean), and
-write a tidy monthly panel to ``RD/factor_panel.csv``.
+write a tidy monthly panel to ``rd/factor_panel.csv``.
 
-This module, its driver and its documentation all live in experiment2's ``RD/``
+This module, its driver and its documentation all live in experiment2's ``rd/``
 subfolder, and it writes its analysis outputs there too.  It is a *second*
 factor library for Experiment 2, alongside ``sw_factors.py``.  Like that module
 it is a **drop-in for Experiment 1's analysis engine**: the quintile sorts,
@@ -15,7 +15,7 @@ and every plot are reused **verbatim** from
 ``experiment1 - general factors/{quintile,regression,cost}.py`` via the shared
 engine in ``experiment1 - general factors/factors.py``.  Only the *factor
 definitions* and the fundamentals they need are new here, and the universe's
-``output_dir`` is the ``RD/`` folder itself, so these factors never collide with
+``output_dir`` is the ``rd/`` folder itself, so these factors never collide with
 the established software factors of ``sw_factors.py`` (which write to ``standard/``).
 
 Motivation
@@ -136,11 +136,11 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # Paths & configuration
 # --------------------------------------------------------------------------- #
-# This module lives in (and writes to) experiment2's RD/ subfolder, so these
+# This module lives in (and writes to) experiment2's rd/ subfolder, so these
 # factors and their outputs live in their own subtree and never collide with
-# sw_factors.py's output/{quintile,regression}.  OUTPUT_DIR is the RD/ folder
+# sw_factors.py's output/{quintile,regression}.  OUTPUT_DIR is the rd/ folder
 # itself (the directory holding this file), so the analysis outputs land
-# directly under RD/ (RD/{factor_panel.csv, quintile/, regression/, ...}).
+# directly under rd/ (rd/{factor_panel.csv, quintile/, regression/, ...}).
 OUTPUT_DIR = Path(__file__).resolve().parent
 
 INDUSTRY_GROUP = "Software & Services"
