@@ -5,25 +5,23 @@ factor_momentum.py
 Experiment 3 -- factor-momentum rotation across Experiment 2's top factors.
 
 Take the five software-industry factors Experiment 2 ranks highest by
-industry-neutral alpha t-stat (the top five of the ranking written by
-``experiment2 - sw factors/main.py`` to ``factor_ranking/monthly_quintile_ranked.csv``)
-and run a **factor-momentum** strategy on them:
+industry-neutral alpha t-stat (the top five of the quarterly-repositioned hand-off
+``quarter_position.ranked_factors``) and run a **factor-momentum** strategy on them:
 
     re-select every 3 months the single factor whose own long/short book earned
-    the most over the *trailing 12 months*, and hold that pick -- rebalanced
-    monthly -- until the next 3-monthly selection.
+    the most over the *trailing 12 months*, and hold that pick until the next
+    3-monthly selection.
 
-Every candidate factor's standalone dollar-neutral long/short book is the
-bullish-oriented Q5-Q1 spread Experiments 1 & 2 already computed (long the
-high-z quintile when the factor's ``direction`` is ``Q5-Q1``, else long the low-z
-quintile -- the same orientation used in its published ``long_short.png``).  At
-each formation month ``t`` (every 3rd month) we look at which candidate earned the
-highest compounded spread over the *trailing 12 months* ``t-12 .. t-1`` -- all
-*realised* returns, known before ``t`` -- and hold that one factor's book until the
-next 3-monthly selection.  Because each candidate's spread is its monthly-rebalanced
-Q5-Q1 series, the held book still rebalances monthly to that factor's current
-quintiles; only the *choice* of factor is refreshed every 3 months.  Selecting on
-already-realised returns makes the rule strictly look-ahead free.
+Every candidate factor's standalone dollar-neutral long/short book is its
+**quarterly-repositioned** bullish-oriented Q5-Q1 spread (long the high-z quintile
+when the factor's ``direction`` is ``Q5-Q1``, else long the low-z quintile),
+computed by the shared ``quarter_position.quarter_held_spread``.  At each formation
+month ``t`` (every 3rd month) we look at which candidate earned the highest
+compounded spread over the *trailing 12 months* ``t-12 .. t-1`` -- all *realised*
+returns, known before ``t`` -- and hold that one factor's quarterly book until the
+next 3-monthly selection.  Selecting on already-realised returns makes the rule
+strictly look-ahead free; because the selection cadence (3 months) matches the
+constituents' quarterly repositioning, the whole strategy repositions quarterly.
 
 The rotation is evaluated exactly like every other long/short book in the
 project: its monthly return is regressed on the market-cap-weighted Software &
@@ -37,9 +35,9 @@ Design -- reuses the engine and composite.py plumbing
 -----------------------------------------------------
 Nothing generic is re-implemented:
 
-* the per-factor long/short returns are read straight from each subexperiment's
-  ``quintile/<factor>/quintile_returns.csv`` (the ``Q5-Q1`` column) and oriented
-  by the ``direction`` recorded in ``monthly_quintile_ranked.csv`` -- no return is recomputed;
+* the per-factor quarterly long/short returns come from the shared
+  ``quarter_position.quarter_held_spread`` (oriented by each factor's bullish
+  ``direction``), so "the factor's book" is defined identically everywhere;
 * the within-industry "market" return, the industry-neutral alpha / Sharpe
   statistics (``industry_return`` / ``book_stats``) and the performance-table
   renderer (``render_performance``) are imported from ``composite.py``, so
@@ -71,15 +69,10 @@ Outputs (``output/factor_momentum/``)
     selection_timeline.png           which factor is held each month + how often
     performance.png                  rotation performance (full / 2016+), with the alpha
                                      and largest single-name ownership for a $100M book
-    factor_momentum_returns.csv      monthly chosen factor + rotation/constituent returns
-    selection_counts.csv             how many months each factor was selected
 ``bivariate/`` -- the 3-monthly-reselected double sort of the trailing-12m top two:
-    long_short.png                   growth of $1 in the rotating double-sort book
     grid_mean_return.png             3x3 tertile grid, cell returns averaged over all months
     performance.png                  book performance (full / 2016+), with the alpha
                                      and largest single-name ownership for a $100M book
-    bivariate_returns.csv            monthly chosen pair + long/short/spread + leg sizes
-    pair_counts.csv                  how many months each pair was selected
 
 Run standalone::
 
@@ -102,44 +95,43 @@ import bivariate_tertile as BT         # double-sort pipeline reused for the top
 # --------------------------------------------------------------------------- #
 # Paths / configuration
 # --------------------------------------------------------------------------- #
-TOP_FACTORS_CSV = C.RANKED_CSV         # Experiment 2's factor ranking (top-N sliced below)
 OUTPUT_DIR = C.OUTPUT_DIR / "factor_momentum"
-UNIVARIATE_DIR = OUTPUT_DIR / "univariate"   # the monthly one-factor rotation
+UNIVARIATE_DIR = OUTPUT_DIR / "univariate"   # the 3-monthly one-factor rotation
 BIVARIATE_DIR = OUTPUT_DIR / "bivariate"     # double sort of the trailing-12m top two
 DECADE_START = C.DECADE_START          # 2016-01-01, the project "past decade" cut-off
-SPREAD_COL = "Q5-Q1"                   # long/short column in each quintile_returns.csv
 
-# The candidate set is the top-N leaders of Experiment 2's ranking, read through
-# the single shared retrieval in ``composite``.
-load_top_factors = C.load_top_factors
+# The candidate set is the top-N leaders of Experiment 2's quarterly-repositioned
+# ranking, read through the single shared hand-off re-exported by ``composite``.
+ranked_factors = C.ranked_factors
 
 
-def signed_spread(subexperiment: str, factor: str, direction: str) -> pd.Series:
+def signed_spread(panel: pd.DataFrame, factor: str, direction: str) -> pd.Series:
     """
-    A factor's bullish-oriented standalone monthly long/short return, read from
-    its ``quintile/<factor>/quintile_returns.csv`` and signed by ``direction``.
+    A factor's bullish-oriented **quarterly-repositioned** standalone long/short
+    return, computed from its source ``panel`` and signed by ``direction``.
 
-    The stored ``Q5-Q1`` column is the raw top-minus-bottom spread; the published
-    book is long the *bullish* leg, so it is ``+Q5-Q1`` when ``direction == 'Q5-Q1'``
-    and ``-(Q5-Q1)`` (i.e. Q1-Q5) otherwise.  Indexed by formation month.
-
-    The file is located through ``composite.factor_quintile_dir`` (``subexperiment``
-    is retained for the caller's display only), so a factor living in Experiment 1
-    rather than an Experiment 2 subexperiment still resolves.
+    Delegates to the shared ``quarter_position.quarter_held_spread`` (buckets formed
+    quarterly, held three months): ``+`` the top-minus-bottom spread when
+    ``direction == 'Q5-Q1'`` (long the high-z leg), ``-`` it (i.e. Q1-Q5) otherwise.
+    Indexed by formation month -- the exact quarterly book every other Experiment 2-5
+    module trades, so no return is recomputed differently here.
     """
-    qr_path = C.factor_quintile_dir(factor) / factor / "quintile_returns.csv"
-    qr = (pd.read_csv(qr_path, parse_dates=["date"])
-            .set_index("date").sort_index())
     sign = 1 if str(direction).strip() == "Q5-Q1" else -1
-    return (sign * qr[SPREAD_COL]).rename(factor)
+    return C.QP.quarter_held_spread(panel, factor, sign).rename(factor)
 
 
 def build_spread_matrix(top: pd.DataFrame) -> pd.DataFrame:
-    """Wide ``month x factor`` matrix of the candidates' signed long/short returns,
-    columns ordered as in the top-factor table."""
-    cols = [signed_spread(r.subexperiment, r.factor, r.direction)
-            for r in top.itertuples()]
-    return pd.concat(cols, axis=1).sort_index()
+    """Wide ``month x factor`` matrix of the candidates' signed quarterly long/short
+    returns, columns ordered as in the top-factor table.  Each library panel is read
+    once (candidates grouped by source panel) and the shared quarterly spread taken
+    per factor."""
+    resolved = C.resolve_factors(top["factor"].tolist())
+    signed: dict[str, pd.Series] = {}
+    for panel_path, grp in resolved.groupby("panel_path", sort=False):
+        panel = C._read_factor_panel(panel_path)
+        for r in grp.itertuples():
+            signed[r.factor] = signed_spread(panel, r.factor, r.direction)
+    return pd.concat([signed[f] for f in top["factor"]], axis=1).sort_index()
 
 
 # --------------------------------------------------------------------------- #
@@ -229,18 +221,17 @@ def held_top_pairs(spreads: pd.DataFrame, lookback: int = LOOKBACK) -> pd.Series
 # Step 3 -- rotation turnover cost
 # --------------------------------------------------------------------------- #
 def _leg_membership(resolved_row) -> pd.DataFrame:
-    """A candidate's bullish-oriented Q5/Q1 leg membership (``date, stock_id,
-    leg``), reconstructed from its source panel via Experiment 1's
-    ``prepare_slice`` -- the same quintile membership its standalone book trades.
-    ``leg`` is "long"/"short" per the factor's bullish direction."""
-    panel = pd.read_csv(resolved_row.panel_path, parse_dates=["date"],
-                        usecols=["date", "stock_id", "factor", "zscore", "next_return"])
-    panel["stock_id"] = panel["stock_id"].astype(str)
-    sub = C.F.prepare_slice(panel, resolved_row.factor, 5)
-    long_q = 5.0 if resolved_row.sign > 0 else 1.0      # bullish leg
-    mem = sub.loc[sub["quintile"].isin([1.0, 5.0]), ["date", "stock_id", "quintile"]].copy()
-    mem["leg"] = np.where(mem["quintile"] == long_q, "long", "short")
-    return mem.drop(columns="quintile")
+    """A candidate's bullish-oriented **quarterly-held** Q5/Q1 leg membership
+    (``date, stock_id, leg``), reconstructed from its source panel via the shared
+    ``quarter_position.quarter_held_membership`` -- the same quarterly membership its
+    standalone book trades.  ``leg`` is "long"/"short" per the factor's bullish
+    direction."""
+    panel = C._read_factor_panel(resolved_row.panel_path)
+    held = C.QP.quarter_held_membership(C.F.prepare_slice(panel, resolved_row.factor, 5))
+    bull = 5.0 if resolved_row.sign > 0 else 1.0        # bullish leg
+    mem = held.loc[held["leg"].isin([1.0, 5.0]), ["date", "stock_id", "leg"]].copy()
+    mem["leg"] = np.where(mem["leg"] == bull, "long", "short")
+    return mem
 
 
 def rotation_legs(factor_names: list[str], chosen: pd.Series) -> pd.DataFrame:
@@ -369,15 +360,8 @@ def run_univariate(top: pd.DataFrame, spreads: pd.DataFrame,
     C.attach_ownership(decade, ownership, start=DECADE_START)
 
     # --- Persist outputs --------------------------------------------------- #
-    panel = spreads.loc[rotated.index].copy()
-    panel["chosen_factor"] = chosen
-    panel["factor_momentum"] = rotated
-    panel.to_csv(out_dir / "factor_momentum_returns.csv")
-
     counts = (chosen.value_counts().rename_axis("factor").rename("months")
                     .reindex(factor_names).fillna(0).astype(int).to_frame())
-    counts["share"] = counts["months"] / counts["months"].sum()
-    counts.to_csv(out_dir / "selection_counts.csv")
 
     plot_cumulative(rotated, factor_names,
                     full["sharpe"], full["alpha"], full["alpha_tstat"],
@@ -429,7 +413,7 @@ def rotating_double_sort(pairs: pd.Series) -> pd.DataFrame:
 
     slices = []
     for pair, months in months_of_pair.items():
-        frame, _ = BT.double_sorted(C.resolve_factors(list(pair)))
+        frame = BT.double_sorted(C.resolve_factors(list(pair)))
         slices.append(frame.loc[frame["date"].isin(months), keep])
     return pd.concat(slices, ignore_index=True).sort_values(["date", "stock_id"])
 
@@ -475,19 +459,10 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
 
     # --- Persist outputs --------------------------------------------------- #
     held = pairs.loc[book.index]                     # pair traded each booked month
-    out = book.copy()
-    out["factor_1"] = held.apply(lambda p: p[0])
-    out["factor_2"] = held.apply(lambda p: p[1])
-    out.to_csv(out_dir / "bivariate_returns.csv")
-
     pair_counts = (held.apply(lambda p: f"{p[0]} x {p[1]}")
                        .value_counts().rename_axis("pair").rename("months").to_frame())
-    pair_counts["share"] = pair_counts["months"] / pair_counts["months"].sum()
-    pair_counts.to_csv(out_dir / "pair_counts.csv")
 
     BT.plot_grid(grids, BIVARIATE_AXES, out_dir / "grid_mean_return.png")
-    BT.plot_long_short(spread, BIVARIATE_AXES, full["sharpe"], full["alpha"],
-                       full["alpha_tstat"], out_dir / "long_short.png")
     C.render_performance(
         windows, "Bivariate factor-momentum double sort: long-short performance",
         "every 3 months double-sort the trailing-12m top two factors (long top-tertile-of-both / "
@@ -511,13 +486,13 @@ def run_bivariate(spreads: pd.DataFrame, out_dir: Path = BIVARIATE_DIR) -> dict:
     return {lbl: s for lbl, s in windows}
 
 
-def run(csv_path: Path = TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> dict:
-    """Build both Experiment-3 factor-momentum pipelines from the top-factor
+def run(out_dir: Path = OUTPUT_DIR) -> dict:
+    """Build both Experiment-3 factor-momentum pipelines from the quarterly top-factor
     hand-off -- the 3-monthly one-factor rotation (``univariate/``) and the double
     sort of the trailing-12m top two (``bivariate/``) -- and write every output
     under ``out_dir``.  Returns ``{"univariate": ..., "bivariate": ...}`` per-window
     performance dicts."""
-    top = load_top_factors(csv_path)
+    top = ranked_factors(C.TOP_N)
     factor_names = top["factor"].tolist()
 
     print("=== Experiment 3: factor momentum ===")

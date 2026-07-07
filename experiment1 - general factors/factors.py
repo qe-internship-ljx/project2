@@ -122,21 +122,30 @@ SOFTWARE_SERVICES = Universe(
 )
 
 # New universe: Banks + Insurance (gics_industry_name), writing to a dedicated
-# output/banks_insurance/ subfolder mirroring the default layout.
+# output/banks_insurance/ subfolder mirroring the default layout.  Applies the
+# same relative market-cap screen as Software & Services (drop the lowest 20% of
+# active names by USD cap each month) so every universe is tested on a comparable
+# investable cross-section.
 BANKS_INSURANCE = Universe(
     slug="banks_insurance",
     price_file="price_banks_insurance.feather",
     output_dir=OUTPUT_DIR / "banks_insurance",
     industries=("Banks", "Insurance"),
+    min_mcap_usd=0.0,
+    min_mcap_pct=0.20,    # relative screen: drop the lowest 20% of active names by USD cap each month
 )
 
 # New universe: Commodity Producers (gics_industry_name), writing to a dedicated
-# output/commodity_producers/ subfolder mirroring the default layout.
+# output/commodity_producers/ subfolder mirroring the default layout.  Same
+# bottom-20%-by-cap relative screen as the other universes, for a comparable
+# investable cross-section.
 COMMODITY_PRODUCERS = Universe(
     slug="commodity_producers",
     price_file="price_commodity_producers.feather",
     output_dir=OUTPUT_DIR / "commodity_producers",
     industries=("Metals & Mining", "Oil, Gas & Consumable Fuels"),
+    min_mcap_usd=0.0,
+    min_mcap_pct=0.20,    # relative screen: drop the lowest 20% of active names by USD cap each month
 )
 
 

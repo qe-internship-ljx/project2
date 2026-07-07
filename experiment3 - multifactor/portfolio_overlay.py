@@ -5,10 +5,10 @@ portfolio_overlay.py
 Experiment 3 -- equal-capital overlay of the top factors' univariate books.
 
 Take the five software-industry factors Experiment 2 ranks highest by
-industry-neutral alpha t-stat (the top five of
-``factor_ranking/monthly_quintile_ranked.csv``, retrieved exactly as
-``factor_momentum.py`` does) and hold **all five standalone
-long/short books at once**, each on 1/5 of capital:
+industry-neutral alpha t-stat (the top five of the quarterly-repositioned hand-off
+``quarter_position.ranked_factors``, retrieved exactly as ``factor_momentum.py``
+does) and hold **all five standalone quarterly long/short books at once**, each on
+1/5 of capital:
 
     overlay_t = mean over factors of (bullish-oriented Q5-Q1 spread)_t
 
@@ -21,9 +21,9 @@ should beat.
 Design -- reuses factor_momentum.py and composite.py wholesale
 --------------------------------------------------------------
 Nothing generic is re-implemented.  The candidate set and each candidate's
-signed standalone long/short return come from ``factor_momentum.load_top_factors``
-/ ``build_spread_matrix`` (which read each factor's published
-``quintile_returns.csv``); the industry benchmark, window statistics,
+signed standalone quarterly long/short return come from
+``factor_momentum.ranked_factors`` / ``build_spread_matrix`` (the shared
+``quarter_position.quarter_held_spread``); the industry benchmark, window statistics,
 cost-incorporated Sharpe and the performance table are ``composite.py``'s
 (``industry_return`` / ``book_stats`` / ``attach_net_cost_sharpe`` /
 ``render_performance``), so "alpha" is defined identically to every other book
@@ -116,11 +116,11 @@ def overlay_cost(legs: pd.DataFrame, months: pd.Index) -> pd.Series:
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def run(csv_path: Path = FM.TOP_FACTORS_CSV, out_dir: Path = OUTPUT_DIR) -> dict:
-    """Build the equal-capital overlay of the top factors' univariate books and
-    write its performance table under ``out_dir``.  Returns the per-window
+def run(out_dir: Path = OUTPUT_DIR) -> dict:
+    """Build the equal-capital overlay of the top factors' univariate quarterly books
+    and write its performance table under ``out_dir``.  Returns the per-window
     performance dict."""
-    top = FM.load_top_factors(csv_path)
+    top = FM.ranked_factors(C.TOP_N)
     factor_names = top["factor"].tolist()
     out_dir.mkdir(parents=True, exist_ok=True)
 

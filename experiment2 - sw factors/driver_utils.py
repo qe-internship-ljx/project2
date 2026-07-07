@@ -2,8 +2,8 @@
 driver_utils.py
 ===============
 
-Shared boilerplate for Experiment 2's per-library drivers (``main.py`` and the
-subfolder ``main_*.py``).  Every driver does the same four things, differing
+Shared boilerplate for Experiment 2's per-library drivers (``monthly_position.py``
+and the subfolder ``main_*.py``).  Every driver does the same four things, differing
 only in *which* factor library it injects and the labels it prints:
 
 1. register its factor library as ``sys.modules["factors"]`` and import
@@ -17,7 +17,7 @@ only in *which* factor library it injects and the labels it prints:
 :func:`run_pipeline` is steps 2-4; each driver keeps only its library import,
 its universe and its labels.  The ``sys.modules["factors"]`` binding is cached
 per Python process, so drivers still must not share an interpreter --
-``main.py`` keeps running each subexperiment in its own subprocess, unchanged.
+``monthly_position.py`` keeps running each subexperiment in its own subprocess.
 """
 
 from __future__ import annotations

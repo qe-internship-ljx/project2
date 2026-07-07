@@ -39,8 +39,8 @@ representation.
 
 Outputs (``output/factor_correlation/<target>/``)
 -------------------------------------------------
-    r2_table.csv     per market factor: n, corr, R^2, slope (+ joint row)
-    r2_table.png     the same table rendered, shaded by R^2
+    r2_table.png     per market factor: n, corr, R^2, slope (+ joint row), rendered
+                     and shaded by R^2
 
 Run standalone::
 
@@ -338,8 +338,8 @@ def run(target_factor: str,
         out_dir: Path | None = None,
         include_market_cap: bool = False) -> pd.DataFrame:
     """
-    Compute the R^2 table for ``target_factor`` and write ``r2_table.csv`` and
-    ``r2_table.png`` under ``out_dir`` (default ``OUTPUT_DIR/<target_factor>``).
+    Compute the R^2 table for ``target_factor`` and render it as ``r2_table.png``
+    under ``out_dir`` (default ``OUTPUT_DIR/<target_factor>``).
     Set ``include_market_cap=True`` to append the ``log_market_cap`` (size) row.
     Returns the table.
     """
@@ -348,7 +348,6 @@ def run(target_factor: str,
 
     table = factor_r2_table(target_factor, target_panel, market_panel,
                             regressor_col, market_factors, include_market_cap)
-    table.to_csv(out_dir / "r2_table.csv", index=False)
     render_r2_table(table, out_dir / "r2_table.png")
 
     joint = table.loc[table["market_factor"] == "__joint__", "r2"].iloc[0]

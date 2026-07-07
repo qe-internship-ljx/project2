@@ -6,24 +6,27 @@ Experiment 3 -- coefficient-weighted composite, evaluated walk-forward with an
 **expanding-window** regression.
 
 Same shape as ``composite.py``, but the constituents are combined with
-**data-driven weights that are re-estimated every month** on all history seen so
-far, and the book is traded strictly out-of-sample.  For each formation month
-``t`` after an initial training period (through ``INITIAL_TRAIN_END``):
+**data-driven weights re-estimated quarterly** on all history seen so far, and the
+book is repositioned quarterly and traded strictly out-of-sample.  At each
+**reposition date** ``t`` (end of Feb / May / Aug / Nov, the project-wide quarterly
+cadence) after an initial training period (through ``INITIAL_TRAIN_END``):
 
   1. Pool every stock-month **strictly before t** -- look-ahead free, only returns
      already realised by ``t`` enter -- and regress the normalised return on the
-     constituent z-scores to get that month's premium vector ``b_f(t)``::
+     constituent z-scores to get that quarter's premium vector ``b_f(t)``::
 
          (r_{i,t+1} − market_{t+1})  =  a  +  Σ_f  b_f · z_{f,i,t}  +  ε
 
   2. Score month ``t``'s cross-section with those weights,
      ``score_{i,t} = Σ_f b_f(t)·z_{f,i,t}`` (intercept dropped -- constant across
-     stocks, so it never changes the ranking), sort into quintiles, and hold the
-     Q5-Q1 book over ``t+1``.
+     stocks, so it never changes the ranking), sort into quintiles, and **hold that
+     Q5-Q1 membership for the three months of the quarter** (via
+     ``composite.bucket_returns`` / ``quarter_position``), the same quarterly
+     repositioning every other Experiment 2-5 book uses.
 
-The window expands each month, so **every traded month is a genuine out-of-sample
-step**: the weights forming month ``t``'s book never saw month ``t``'s (or any
-later) return.  The first traded month is the first formation month after
+The window expands each quarter, so **every traded month is a genuine out-of-sample
+step**: the weights forming a quarter's book never saw that quarter's (or any later)
+return.  The first traded quarter is the first reposition date after
 ``INITIAL_TRAIN_END`` (default: initial training through 2006, trading 2007+).
 
 Normalised return -- the dependent variable
@@ -37,22 +40,20 @@ dominated by the handful of mega-cap software names.  This is
 Design -- reuses composite.py wholesale
 ---------------------------------------
 The constituent loading (``load_exposures``), the score → tidy-panel shaping
-(``scored_frame`` / ``as_factor_panel``), the quintile sort (Experiment 1's
-``quintile.py``), the industry-neutral alpha and windowed performance
-(``industry_return`` / ``book_stats``), the turnover cost, and the plotting /
-table rendering (``plot_long_short`` / ``render_performance``) are all imported
+(``scored_frame`` / ``as_factor_panel``), the quarterly-held quintile sort
+(``bucket_returns`` / ``quintile_legs``, which reposition quarterly via
+``quarter_position``), the industry-neutral alpha and windowed performance
+(``industry_return`` / ``book_stats``), the turnover cost, and the performance-
+table rendering (``render_performance``) are all imported
 from ``composite.py``.  The dependent variable (``regression.normalized_return``)
 and the pooled month-clustered OLS (``regression.pooled_ols``) are reused from
 Experiment 1's ``regression.py``.  This module adds **only** the equal-weighted
-benchmark and the expanding-window walk-forward.
+benchmark and the expanding-window, quarterly-refit walk-forward.
 
 Outputs (``output/weighted/<slug>/``)
 -------------------------------------
-    beta_path.csv            each factor's expanding-window weight b_f(t) over time
-    tstat_path.csv           each factor's expanding-window clustered t-stat over time
     beta_path.png                both paths in one stacked figure -- weights on top,
                              clustered t-stats (with ±1.65/±2.0 bands) below
-    long_short.png           the walk-forward Q5-Q1 book's growth of $1
     performance.png          the walk-forward Q5-Q1 book's performance summary
                              (incl. the alpha earned above each constituent's
                              standalone factor book + largest single-name ownership
@@ -76,7 +77,7 @@ import pandas as pd
 
 import composite as C
 import bivariate_tertile as BT         # reused benchmark-relative alpha estimator
-from composite import F, Q, R          # reused engine + analysis handles
+from composite import F, R             # reused engine + analysis handles
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -158,25 +159,31 @@ def expanding_weights(exposures: pd.DataFrame, fit: pd.DataFrame, names: list[st
                       min_train_months: int = MIN_TRAIN_MONTHS
                       ) -> tuple[pd.Series, pd.DataFrame, pd.DataFrame]:
     """
-    Walk forward month by month.  For each formation month ``t`` after
-    ``initial_train_end``, refit the premium regression on every stock-month
-    **strictly before t** and use the slopes to weight month ``t``'s z-scores.
+    Walk forward **quarter by quarter**.  At each reposition date ``t`` (end of Feb /
+    May / Aug / Nov) after ``initial_train_end``, refit the premium regression on
+    every stock-month **strictly before t** and hold those slopes over the three
+    months of the quarter, weighting each held month's z-scores with them.
 
     Returns ``(score, beta_path, tstat_path)``:
-      * ``score``      -- expanding-window weighted score per ``(date, stock_id)``
-                          for every traded month (fed to the reused quintile sort);
-      * ``beta_path``  -- formation month × factor, the weight ``b_f(t)``;
-      * ``tstat_path`` -- formation month × factor, the clustered t-stat of ``b_f(t)``.
+      * ``score``      -- the quarterly-weighted score per ``(date, stock_id)`` for
+                          every month of every traded quarter.  The reposition-month
+                          score uses that quarter's fresh weights; the held months
+                          carry them forward, so when the reused quarterly sort
+                          (``composite.bucket_returns``) keeps the reposition-date
+                          buckets it re-forms membership only quarterly;
+      * ``beta_path``  -- reposition date × factor, the weight ``b_f(t)``;
+      * ``tstat_path`` -- reposition date × factor, the clustered t-stat of ``b_f(t)``.
 
-    Look-ahead free: the weights forming month ``t``'s book never see ``t``'s own
+    Look-ahead free: the weights forming a quarter's book never see that quarter's own
     (or any later) return, so every traded month is out-of-sample.
     """
     dates = fit.index.get_level_values("date")
-    traded = sorted(t for t in exposures.index.get_level_values("date").unique()
-                    if t > initial_train_end)
+    all_months = sorted(exposures.index.get_level_values("date").unique())
+    reposition = [t for t in all_months
+                  if t > initial_train_end and t.month in C.QP.REPOSITION_MONTHS]
 
     score_parts, betas, tstats = [], {}, {}
-    for t in traded:
+    for i, t in enumerate(reposition):
         past = fit[dates < t]
         if past.index.get_level_values("date").nunique() < min_train_months:
             continue
@@ -185,10 +192,15 @@ def expanding_weights(exposures: pd.DataFrame, fit: pd.DataFrame, names: list[st
         betas[t] = w
         tstats[t] = coef.loc[names, "t_cluster"]
 
-        z_t = exposures.xs(t, level="date")                 # stock_id × factor
-        s = z_t.mul(w, axis=1).sum(axis=1)
-        s.index = pd.MultiIndex.from_product([[t], s.index], names=["date", "stock_id"])
-        score_parts.append(s)
+        # Hold this quarter's weights over its months (t and the two calendar months
+        # after it, up to the next reposition), scoring each held cross-section.
+        upper = reposition[i + 1] if i + 1 < len(reposition) else None
+        held = [m for m in all_months if m >= t and (upper is None or m < upper)]
+        for m in held:
+            z_m = exposures.xs(m, level="date")             # stock_id × factor
+            s = z_m.mul(w, axis=1).sum(axis=1)
+            s.index = pd.MultiIndex.from_product([[m], s.index], names=["date", "stock_id"])
+            score_parts.append(s)
 
     score = pd.concat(score_parts)
     beta_path = pd.DataFrame(betas).T.rename_axis("date").sort_index()
@@ -277,10 +289,12 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     # 3. Expanding-window weights -> walk-forward score + beta / t-stat paths.
     score, beta_path, tstat_path = expanding_weights(exposures, fit, names, initial_train_end)
 
-    # 4. Shape for the reused quintile sort and build the Q5-Q1 book.  The sort is
-    #    an internal step -- no quintile files are written.
+    # 4. Shape for the reused quarterly sort and build the Q5-Q1 book: the composite
+    #    is bucketed with ``composite.bucket_returns``, which forms quintiles at each
+    #    reposition date and holds them for the quarter (the same quarterly membership
+    #    the weights were refit on).  The sort is internal -- no quintile files written.
     panel = C.as_factor_panel(C.scored_frame(score, next_ret))
-    wide = Q.quintile_returns(panel, C.COMPOSITE_FACTOR)
+    wide = C.bucket_returns(panel)
     spread = wide["Q5-Q1"]
 
     # 5. Walk-forward (out-of-sample by construction) performance of the book.
@@ -305,13 +319,8 @@ def run(factor_names: list[str] = DEFAULT_FACTORS,
     windows = [(win_label, stats)]
 
     # --- Persist outputs --------------------------------------------------- #
-    beta_path.to_csv(out_dir / "beta_path.csv")
-    tstat_path.to_csv(out_dir / "tstat_path.csv")
     plot_paths(beta_path, tstat_path, factor_names, out_dir / "beta_path.png")
 
-    C.plot_long_short(spread, factor_names, stats["sharpe"], stats["alpha"],
-                      stats["alpha_tstat"], out_dir / "long_short.png",
-                      stat_window=win_label)   # whole series is walk-forward; no split line
     C.render_performance(
         windows,
         "Coefficient-weighted composite long-short (Q5-Q1): expanding-window walk-forward",

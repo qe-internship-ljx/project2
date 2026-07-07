@@ -9,9 +9,15 @@ composite_{i,t} = Σ_f  sign_f · zscore_{f,i,t}
 ```
 
 is the **sum of the stock's cross-sectional z-scores** across the chosen factors.
-The industry is sorted into five equal-count buckets on this composite, and the
-Q5−Q1 dollar-neutral book's performance is measured (mean, t-stat, Sharpe, and
-the industry-neutral alpha used throughout the project).
+The industry is sorted into five equal-count buckets on this composite and the
+membership is **repositioned quarterly** (the project-wide convention — buckets
+formed only end of Feb/May/Aug/Nov and held three months, via
+`quarter_position.quarter_held_membership`), and the Q5−Q1 dollar-neutral book's
+performance is measured (mean, t-stat, Sharpe, and the industry-neutral alpha used
+throughout the project). The constituents themselves are the **top five of
+Experiment 2's quarterly-repositioned ranking** (`quarter_position.ranked_factors`,
+which reads the ranking Experiment 2 persists to
+`factor_ranking/quarter_{label}_ranked.csv`).
 
 There is **no significance gate and no regression model**: the caller passes the
 factor set explicitly, and the factors are combined by standardised aggregation —
@@ -22,11 +28,11 @@ Five ways to combine the factors, sharing one spine (plus the redundancy tool):
 
 | Module | Combination | Evaluation |
 |---|---|---|
-| [`composite.py`](composite.py) | equal-weighted z-score sum (signs `±1`), quintile sort | full sample + past decade |
-| [`weighted_composite.py`](weighted_composite.py) | coefficient-weighted score — **expanding-window** regression premia, refit every month | **walk-forward out-of-sample (2007+)** |
-| [`bivariate_tertile.py`](bivariate_tertile.py) | independent 3×3 **double sort** on two factors — long T3∩T3, short T1∩T1 (plus a coarser median-split "half" rule) | full sample + past decade |
-| [`factor_momentum.py`](factor_momentum.py) | **rotation**: hold the factor (univariate) or double-sort the **top two** factors (bivariate) with the best trailing-12m book return — re-selected every 3 months, book rebalanced monthly | full sample + past decade |
-| [`portfolio_overlay.py`](portfolio_overlay.py) | equal-capital **overlay** of the top-5 standalone books (1/5 each, turnover netted per name across books) | full sample + past decade |
+| [`composite.py`](composite.py) | equal-weighted z-score sum (signs `±1`), quarterly-repositioned quintile sort (plus a tertile variant for the tertile-ranked top-5 and a half variant for the half-ranked top-5) | full sample + past decade |
+| [`weighted_composite.py`](weighted_composite.py) | coefficient-weighted score — **expanding-window** regression premia, refit **quarterly** and held for the quarter | **walk-forward out-of-sample (2007+)** |
+| [`bivariate_tertile.py`](bivariate_tertile.py) | independent 3×3 **double sort** on two factors, repositioned quarterly — long T3∩T3, short T1∩T1 (plus a coarser median-split "half" rule) | full sample + past decade |
+| [`factor_momentum.py`](factor_momentum.py) | **rotation**: hold the factor (univariate) or double-sort the **top two** factors (bivariate) with the best trailing-12m quarterly book return — re-selected every 3 months | full sample + past decade |
+| [`portfolio_overlay.py`](portfolio_overlay.py) | equal-capital **overlay** of the top-5 standalone quarterly books (1/5 each, turnover netted per name across books) | full sample + past decade |
 | [`factor_correlation.py`](factor_correlation.py) | redundancy tool — R² of an industry factor on Experiment 1's general factors | — |
 
 [`main.py`](main.py) orchestrates all five pipelines, each in its own
@@ -58,10 +64,12 @@ the rest of this section covers the equal-weighted `composite.py`.
    sum across factors. A high composite is "attractive across the whole set", so
    the book is unambiguously long Q5 / short Q1.
 
-3. **Sort** (Experiment 1's `quintile.py`, *unmodified*). The composite is shaped
-   as a one-factor panel and fed to the engine's even-quintile sort: within-month
-   winsorisation, equal-count buckets, and the months × {Q1..Q5, Q5−Q1} table of
-   mean next-period returns are exactly Experiment 1's code path.
+3. **Sort & hold quarterly** (`bucket_returns`, reusing Experiment 1's
+   `prepare_slice` + `quarter_position.quarter_held_membership`). The composite is
+   shaped as a one-factor panel; even-count buckets are formed at each reposition
+   date (end Feb/May/Aug/Nov) and held fixed for the quarter, giving the months ×
+   {Q1..Q5, Q5−Q1} table of mean next-period returns — Experiment 1's winsorisation
+   and equal-count sort, repositioned quarterly instead of monthly.
 
 4. **Measure** (Experiment 1's `regression.py` helpers). The Q5−Q1 book is scored
    over the full sample and the past decade (2016+): mean, t-stat, annualised
@@ -81,7 +89,7 @@ before importing the analysis modules, exactly as Experiment 2's `main.py` does:
 
 | Concern | Source | Reuse |
 |---|---|---|
-| Winsorisation, equal-count quintiles, quintile-return table | `experiment1 - general factors/quintile.py` + `factors.py` | imported and run **unmodified** |
+| Winsorisation + equal-count sort; quarterly holding | `experiment1 - general factors/quintile.py` + `factors.py` + `quarter_position.quarter_held_membership` | sort reused **unmodified**, membership held quarterly |
 | Industry return + industry-neutral alpha regression | `experiment1 - general factors/regression.py` | helpers reused (same alpha as the rest of the project) |
 | Factor **exposures** (the z-scores) | Exp 1, Exp 2 & R&D `output/.../factor_panel.csv` | read as written |
 | Factor **orientation** (bullish sign) | Exp 1, Exp 2 & R&D `output/.../long_short_market_alpha.csv` | read as written |
@@ -93,7 +101,7 @@ every input it consumes was already produced upstream. The pipeline is factor-se
 agnostic — any factor produced by Experiments 1–2 (or the R&D extension) can be
 combined by name. `composite.py` exposes the shared spine (`load_exposures`,
 `scored_frame`, `as_factor_panel`, `industry_return`, `book_stats`,
-`plot_cumulative` / `plot_long_short` / `render_performance`); the weighted
+`plot_cumulative` / `render_performance`); the weighted
 variant reuses all of it and adds only the equal-weighted benchmark and the
 expanding-window walk-forward.
 
@@ -118,28 +126,26 @@ python portfolio_overlay.py                                  # equal-capital ove
 Requires Experiments 1 and 2 (and, for R&D factors, the R&D extension) to have
 been run first — it reads their `factor_panel.csv` and `long_short_market_alpha.csv`.
 
-## Outputs (`output/composite/<slug>/`)
+## Outputs (`output/composite/<ranking>/`)
 
-`<slug>` is the factor names joined by `__`.
+`<ranking>` is `quarter_quintile`, `quarter_tertile` or `quarter_half` (the
+quarterly-repositioned hand-off the composite is built from; `<word>` below is
+`quintile` / `tertile` / `half`).
 
 ```
-factor_set.png              the constituents: family, source, sign, standalone alpha
-exposure_correlation.csv    pairwise correlation of the oriented constituent z-scores
-quintile_returns.csv        months × {Q1..Q5, Q5−Q1}, mean next-period return
-quintile_cumulative.png     the five buckets as cumulative growth of $1 (log scale)
-long_short.png              the Q5−Q1 book's cumulative growth of $1
-performance.png             mean / t / Sharpe / industry-neutral alpha / largest
+<word>_cumulative.png       the buckets as cumulative growth of $1 (log scale)
+<word>_performance.png      mean / t / Sharpe / industry-neutral alpha / largest
                             single-name ownership for a $100M book (full + 2016+)
 ```
 
 ## Headline result — the top-five factor composite
 
 The default composite blends Experiment 2's five top-ranked factors — the top
-five of the `monthly_quintile_ranked.csv` ranking that `factor_momentum.py` also rotates across:
-`gross_profitability`, `rd_stability`, `fscore`, `buyback_quality`,
-`revenue_stability`. Summing their sign-oriented z-scores fuses weakly-correlated
-quality / R&D-commitment / capital-discipline / durability signals into one score,
-so they carry largely **additive** information.
+five of the quarterly-repositioned `quarter_position.ranked_factors` hand-off that
+`factor_momentum.py` also rotates across: `gross_profitability`, `fscore`,
+`rd_stability`, `revenue_stability`, `buyback_quality`. Summing their sign-oriented
+z-scores fuses weakly-correlated quality / R&D-commitment / capital-discipline /
+durability signals into one score, so they carry largely **additive** information.
 
 α below is the industry-neutral alpha against the **market-cap-weighted** Software &
 Services return; the Q5−Q1 spread, t-stat and Sharpe do not reference the benchmark
@@ -170,18 +176,19 @@ and are unchanged.
   re-estimated every month on an **expanding, look-ahead-free window** (walk-forward),
   not one full-sample slope.
 - **Robust across the past decade.** The alpha is essentially unchanged in the
-  2016+ re-estimation (1.08%/mo, t = 3.15), not a pre-2010 artifact. (For a genuine
-  walk-forward holdout with weights refit every month, see the weighted variant below.)
+  2016+ re-estimation, not a pre-2010 artifact. (For a genuine walk-forward holdout
+  with weights refit quarterly, see the weighted variant below.)
 
 ## Coefficient-weighted variant (expanding-window walk-forward) — `weighted_composite.py`
 
 Instead of an equal-weighted straight sum, weight each constituent by its
-**estimated return premium**, re-estimated **every month on an expanding window**
-and traded strictly walk-forward. The default set here is **`revenue_stability` +
-`gross_profitability`**, with an initial training period through **2006** and the
-book traded from **2007 onwards** (configurable via `INITIAL_TRAIN_END`).
+**estimated return premium**, re-estimated **quarterly on an expanding window** and
+traded strictly walk-forward, with the resulting quintile membership held for the
+quarter. The default set here is **`revenue_stability` + `gross_profitability`**,
+with an initial training period through **2006** and the book traded from **2007
+onwards** (configurable via `INITIAL_TRAIN_END`).
 
-For each formation month `t` after the initial training period:
+For each reposition date `t` (end Feb/May/Aug/Nov) after the initial training period:
 
 1. **Expanding-window premia.** Pool every stock-month **strictly before `t`** —
    look-ahead free, only returns already realised by `t` enter — and regress the
@@ -193,11 +200,11 @@ For each formation month `t` after the initial training period:
 2. **Weighted score.** Score month `t`'s cross-section with those weights,
    `score_{i,t} = Σ b_f(t)·z_{f,i,t}` — the model's predicted industry-relative
    return (intercept dropped; it doesn't affect the cross-sectional ranking). Sort
-   into quintiles, long Q5 / short Q1, hold over `t+1`.
-3. **Walk-forward.** The window expands one month and step 1 repeats, so **every
-   traded month is out-of-sample**: the weights forming month `t`'s book never saw
-   `t`'s (or any later) return. There is no single fixed train/test split — the
-   whole 2007+ path is the holdout.
+   into quintiles, long Q5 / short Q1, and **hold that membership for the quarter**.
+3. **Walk-forward.** The window expands one quarter and step 1 repeats, so **every
+   traded month is out-of-sample**: the weights forming a quarter's book never saw
+   that quarter's (or any later) return. There is no single fixed train/test split —
+   the whole 2007+ path is the holdout.
 
 ### Full-sample premia (reference)
 
@@ -249,11 +256,11 @@ history accrues, but its clustered t-stat stays firmly above 4 throughout.
   +0.11%/mo (t = 1.08) above `gross_profitability` alone — so the blend mostly
   tracks its dominant leg and adds little beyond simply holding it.
 
-Outputs land under `output/weighted/<slug>/`: `beta_path.csv` / `tstat_path.csv` and `paths.png` (the
-expanding-window weights and t-stats over time — both series in one stacked figure),
-`long_short.png` (the walk-forward book's growth of $1), and `performance.png` (the
-walk-forward summary, including the α earned above each constituent's standalone
-book). No quintile files are written — the sort is an internal step.
+Outputs land under `output/weighted/<slug>/`: `beta_path.png` (the expanding-window
+weights and t-stats over time — both series in one stacked figure) and
+`performance.png` (the walk-forward summary, including the α earned above each
+constituent's standalone book). No quintile files are written — the sort is an
+internal step.
 
 ## Other combinations — `bivariate_tertile.py`, `factor_momentum.py`, `portfolio_overlay.py`
 
@@ -270,19 +277,18 @@ T3∩T3 corner and short the T1∩T1 corner, equal-weighted within each leg. A
 coarser **half-intersection** rule (median split, ~1/4 of names per corner
 instead of ~1/9) is reported alongside to show whether the edge survives a
 milder, higher-capacity cut. Outputs land under
-`output/bivariate_tertile/<slug>/` (`grid_mean_return.png` 3×3 heatmap,
-`bivariate_returns.csv`, `long_short.png`, `performance.png` — including alpha
-over each constituent's standalone book and single-name ownership for a $100M
-book — plus a `half/` mirror).
+`output/bivariate_tertile/<slug>/` (`grid_mean_return.png` 3×3 heatmap and
+`performance.png` — including alpha over each constituent's standalone book and
+single-name ownership for a $100M book — plus a `half/` mirror).
 
 **`factor_momentum.py` — rotation across the top factors.** Two pipelines over
-the top five of Experiment 2's `monthly_quintile_ranked.csv` ranking:
+the top five of Experiment 2's quarterly-repositioned `ranked_factors` hand-off,
+each candidate book being that factor's quarterly Q5−Q1 spread:
 *univariate* — every 3 months select the single factor whose own long/short book
 earned the most over the trailing 12 months (all realised, look-ahead-free) and
-hold it, rebalanced monthly, until the next selection;
+hold it until the next selection;
 *bivariate* — every 3 months take the trailing-12m **top two** factors and trade
-their `bivariate_tertile` double sort, re-selecting the pair every 3 months (the
-double sort still rebalances monthly in between). Outputs
+their `bivariate_tertile` double sort, re-selecting the pair every 3 months. Outputs
 land under `output/factor_momentum/{univariate,bivariate}/` (cumulative growth,
 selection timeline / grid diagnostic, `performance.png`).
 
@@ -315,8 +321,8 @@ python factor_correlation.py                      # buyback_quality vs the 9 mar
 python -c "from factor_correlation import run; run('rd_productivity')"
 ```
 
-Outputs land under `output/factor_correlation/<target>/` as `r2_table.csv` and a
-shaded `r2_table.png` (uses the project's z-score exposures by default).
+Outputs land under `output/factor_correlation/<target>/` as a shaded `r2_table.png`
+(uses the project's z-score exposures by default).
 
 ### Result — `buyback_quality` (z-score, ~128k stock-months)
 

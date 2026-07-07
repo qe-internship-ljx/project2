@@ -4,33 +4,39 @@ Re-evaluates the project's factor books with **market-cap-aware position
 sizing** instead of equal weighting, asking how much of each premium survives
 when the book is tilted toward the names that can actually absorb capital.
 
-The standard quintile/tertile book puts as much money into a $150M microcap as
-into a $150B megacap — uninvestable at size; pure cap weighting swings to the
-opposite extreme. `capacity_scaling.py` tests two monotone middle grounds,
-applied **within each leg** (buckets, orientation, benchmark and every
-downstream statistic are unchanged, so each table reads directly against the
-standard equal-weighted book):
+The standard quintile book puts as much money into a $150M microcap as into a
+$150B megacap — uninvestable at size; pure cap weighting swings to the opposite
+extreme. `capacity_scaling.py` tests two monotone middle grounds, applied **within
+each leg** of the **quarterly-repositioned** quintile book (buckets, formed
+quarterly and held three months via `quarter_position.quarter_held_membership`,
+plus orientation, benchmark and every downstream statistic are unchanged, so each
+table reads directly against the standard equal-weighted quarterly book):
 
 ```
 sqrt:  w_i ∝ sqrt(mcap_usd_i)      # mild tilt toward larger, more liquid names
 log6:  w_i ∝ log(mcap_usd_i)^6     # steep tilt, concentrates on the largest names
 ```
 
-## Two pipelines
+## Three pipelines
+
+Output is grouped by pipeline under `output/capacity_scaling/`
+(`univariate_scaled/`, `bivariate_scaled/`, `composite_scaled/`).
 
 **Univariate (`run`).** Re-evaluates **exactly the same factor universe as
-Experiment 2's `tertile.py`** (Experiment 1's general factors + every
-Experiment 2 software subexperiment; `tertile.SOURCES` is imported by path as
-the single source of truth). For each factor the even-quintile sort is
-Experiment 1's `prepare_slice`; only the within-leg weights change. Turnover
-cost is charged on the **actual capacity-weighted legs** (`cost.turnover_cost`),
+Experiment 2's `quarter_position.py`** (Experiment 1's general factors + every
+Experiment 2 software subexperiment; `quarter_position.SOURCES`, re-exported from
+the shared monthly re-evaluation, is imported by path as the single source of
+truth). For each factor the even-quintile sort is
+Experiment 1's `prepare_slice`, held quarterly via
+`quarter_position.quarter_held_membership`; only the within-leg weights change.
+Turnover cost is charged on the **actual capacity-weighted legs** (`cost.turnover_cost`),
 and each factor is scored with the standard alpha-table statistics (full sample
-and 2016+), ranked by combined alpha t-stat. Output: one alpha table per
+and 2016+), ranked by combined (full + 2016+) net-of-cost beta-neutral Sharpe. Output: one alpha table per
 weighting scheme —
 
 ```
-output/capacity_scaling/long_short_market_alpha.png        # sqrt
-output/capacity_scaling/log6_long_short_market_alpha.png   # log6
+output/capacity_scaling/univariate_scaled/long_short_market_alpha.png        # sqrt
+output/capacity_scaling/univariate_scaled/log6_long_short_market_alpha.png   # log6
 ```
 
 **Bivariate (`run_bivariate`).** Applies the sqrt weighting to Experiment 3's
@@ -40,20 +46,36 @@ each corner. Default pairs: `return_stability × gross_profitability` and
 `revenue_stability × gross_profitability` (or pass pairs on the CLI). Each pair
 is benchmarked against its constituents' standalone books and reports the
 largest single-name ownership for a $100M book. Output: one performance table
-per pair under `output/bivariate_tertile/`.
+per pair under `output/capacity_scaling/bivariate_scaled/`.
+
+**Composite (`run_composite`).** Applies the sqrt weighting to Experiment 3's
+composite z-score book (`composite.py`, imported by path): the top-five factors'
+sign-oriented z-scores are summed into one score and the top / bottom buckets of
+that composite are sqrt-cap-weighted within each leg (everything else — the
+composite construction, factor selection, quarterly-held even-bucket sort,
+orientation and statistics — is the composite driver's own). It is run over both
+of `composite.RANKINGS`, each bucketed the way its constituents were ranked: the
+`quarter_quintile` selection into **quintiles**, the `quarter_tertile` selection
+into **tertiles**. Output: one performance table per ranking, in the same format
+as the bivariate table —
+
+```
+output/capacity_scaling/composite_scaled/quarter_quintile_performance.png   # quintile sort
+output/capacity_scaling/composite_scaled/quarter_tertile_performance.png    # tertile sort
+```
 
 ## Reuse
 
 Experiment 1's `factors` / `cost` / `regression` are imported off `sys.path`
-(the generic engine, no library injection); Experiment 2's `tertile.py` and
-Experiment 3's `bivariate_tertile.py` are loaded by file path for the factor
-universe and the double-sort mechanics. This experiment adds **only** the
-within-leg weighting schemes.
+(the generic engine, no library injection); Experiment 2's `quarter_position.py`
+and Experiment 3's `bivariate_tertile.py` / `composite.py` are loaded by file path
+for the factor universe, the double-sort mechanics and the composite construction.
+This experiment adds **only** the within-leg weighting schemes.
 
 ## Run
 
 ```bash
-python capacity_scaling.py                                        # univariate (sqrt + log6) + default bivariate pairs
+python capacity_scaling.py    # univariate (sqrt + log6) + default bivariate pairs + both composite rankings
 ```
 
 Requires Experiments 1–3 to have been run first (it reads their factor panels

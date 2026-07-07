@@ -3,13 +3,16 @@ capacity_scaling.py
 ===================
 
 Re-evaluate **exactly the same set of factors** as
-``experiment2 - sw factors/tertile.py`` -- Experiment 1's general market factors
-plus every Experiment 2 software subexperiment (Standard, RD, Stability, Skew)
--- but change **how the two legs are weighted**.
+``experiment2 - sw factors/quarter_position.py`` -- Experiment 1's general market
+factors plus every Experiment 2 software subexperiment (Standard, RD, Stability,
+Skew) -- but change **how the two legs are weighted**.
 
-Where the standard quintile book (and ``tertile.py``) equal-weights every name
-inside the top and bottom bucket, here each name is weighted by a monotone
-function of its USD market cap, normalised to sum to one within its leg.  Two
+Where the standard quintile book equal-weights every name inside the top and bottom
+bucket, here each name is weighted by a monotone function of its USD market cap,
+normalised to sum to one within its leg.  The books are **repositioned quarterly**
+(the project-wide convention -- buckets formed at each end-Feb/May/Aug/Nov reposition
+date and held three months, via ``quarter_position.quarter_held_membership``); only
+the within-leg weighting differs from the standard quarterly quintile book.  Two
 capacity tilts are tested (see :data:`WEIGHTINGS`):
 
     sqrt:  w_{i,t}  =  sqrt(mcap_usd_{i,t})       / Σ_j sqrt(mcap_usd_{j,t})
@@ -28,7 +31,7 @@ and every downstream statistic are identical to the quintile pipeline, so each
 alpha table reads directly against the standard (equal-weighted) quintile book.
 
 The output is one alpha table per weighting scheme, in the *same* format as
-``experiment2 - sw factors/factor_ranking/monthly_tertile.png``.
+``experiment2 - sw factors/factor_ranking/quarter_quintile.png``.
 
 Bivariate extension (Experiment 3's double sort)
 ------------------------------------------------
@@ -41,7 +44,21 @@ double sort, orientation, benchmark books, industry-neutral alpha and every
 downstream statistic are the Experiment 3 driver's own (reused by path), so the
 rendered table reads directly against that experiment's equal-weighted
 ``bivariate_tertile/<slug>/performance.png``.  It writes a single performance
-table per factor pair, grouped under ``output/bivariate_tertile/``.
+table per factor pair, grouped under ``output/capacity_scaling/bivariate_scaled/``.
+
+Composite extension (Experiment 3's composite z-score sort)
+-----------------------------------------------------------
+:func:`run_composite` applies the *same* sqrt(market-cap) within-leg tilt to
+**Experiment 3's composite z-score book** (``composite.py``), which sums the top
+five factors' sign-oriented z-scores into one score and longs the top bucket /
+shorts the bottom bucket of that composite.  Only the within-leg weighting changes
+from equal to sqrt-cap; the composite construction, the factor selection, the
+quarterly-held even-bucket sort, orientation, benchmark and every downstream
+statistic are Experiment 3's own (reused by path).  It is run over both of
+``composite.RANKINGS`` -- the ``quarter_quintile`` selection sorted into QUINTILES
+and the ``quarter_tertile`` selection sorted into TERTILES, each bucketed the way
+its constituents were ranked -- and writes one performance table per ranking,
+grouped under ``output/capacity_scaling/composite_scaled/``.
 
 Bucketing
 ---------
@@ -56,13 +73,13 @@ verbatim and keep the ``Q5-Q1`` / ``Q1-Q5`` labels.
 
 Reuse (the project's standard conventions)
 ------------------------------------------
-* The **factor universe is not redefined here** -- we import ``tertile.py`` by
-  path and reuse its ``SOURCES`` list and ``_load_panel`` helper, so "the same
-  set of factors as tertile.py" stays literally true even if that list changes.
+* The **factor universe is not redefined here** -- we import ``quarter_position.py``
+  by path and reuse its ``SOURCES`` list and ``_load_panel`` helper (which it in turn
+  re-exports from the shared monthly re-evaluation), so "the same set of factors as
+  Experiment 2" stays literally true even if that list changes.
 * Experiment 1's engine is imported by path (``factors`` / ``cost`` /
   ``regression`` off ``sys.path`` -- the *generic* engine, driven purely by the
-  panel columns; we do **not** override ``sys.modules['factors']``, exactly like
-  ``tertile.py``).
+  panel columns).
 * ``factors.prepare_slice`` gives the even quintile sort; the ``weight`` column
   the panel already carries (formation-date USD market cap) supplies the sqrt-cap
   weights, so no market-cap plumbing is duplicated.
@@ -107,20 +124,24 @@ import regression          # noqa: E402
 
 def _load_by_path(name: str, path: Path):
     """Import a module from an explicit file path (the folder name has spaces, so
-    the usual ``import`` won't find it).  Used to reuse ``tertile.py`` without
-    copying its source list."""
+    the usual ``import`` won't find it).  Used to reuse Experiment 2's
+    ``quarter_position.py`` without copying its source list."""
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)                       # type: ignore[union-attr]
     return mod
 
 
-# Reuse the tertile driver's factor universe + panel loader -- single source of
-# truth for "the same set of factors as tertile.py".  Importing it is side-effect
-# free (its ``run()`` is guarded by ``__main__``).
-_tertile = _load_by_path("exp2_tertile", _EXP2_DIR / "tertile.py")
-SOURCES = _tertile.SOURCES
-_load_panel = _tertile._load_panel
+# Reuse Experiment 2's **quarterly** pipeline -- the capacity-tilted books reposition
+# quarterly too (the project-wide convention), so ``quarter_position.py`` is the sole
+# Experiment 2 dependency: its ``quarter_held_membership`` holds each factor's bucket
+# assignment fixed within the quarter, and it re-exports the shared factor universe
+# (``SOURCES``) and panel loader (``_load_panel``) from the monthly re-evaluation --
+# a single source of truth for "the same set of factors as Experiment 2".  Importing
+# it is side-effect free (its ``run`` / ``run_regression`` are guarded by ``__main__``).
+_qp = _load_by_path("exp2_quarter_position", _EXP2_DIR / "quarter_position.py")
+SOURCES = _qp.SOURCES
+_load_panel = _qp._load_panel
 
 # Reuse Experiment 3's bivariate double-sort driver by path for the capacity-
 # scaled bivariate books (:func:`run_bivariate`).  It does ``import composite``
@@ -161,24 +182,26 @@ WEIGHTINGS = [
     {
         "label": "sqrt",
         "raw_weight": _sqrt_cap_weight,
-        "out_png": _THIS_DIR / "output" / "capacity_scaling" / "long_short_market_alpha.png",
+        "out_png": _THIS_DIR / "output" / "capacity_scaling" / "univariate_scaled"
+                   / "long_short_market_alpha.png",
         "title": (
-            "Long-short QUINTILE strategy with sqrt(market-cap)-weighted legs, "
-            "regressed on the industry return\n(long top quintile / short bottom "
-            "quintile; within each leg w_i ∝ √(USD market cap);  "
-            "ls_t = α + β·industry_t + ε,  α = industry-neutral monthly return, "
-            "t-stat tests α ≠ 0)"),
+            "Long-short QUINTILE strategy (repositioned QUARTERLY) with "
+            "sqrt(market-cap)-weighted legs, regressed on the industry return\n"
+            "(long top quintile / short bottom quintile; within each leg "
+            "w_i ∝ √(USD market cap);  ls_t = α + β·industry_t + ε,  "
+            "α = industry-neutral monthly return, t-stat tests α ≠ 0)"),
     },
     {
         "label": "log6",
         "raw_weight": _log6_cap_weight,
-        "out_png": _THIS_DIR / "output" / "capacity_scaling" / "log6_long_short_market_alpha.png",
+        "out_png": _THIS_DIR / "output" / "capacity_scaling" / "univariate_scaled"
+                   / "log6_long_short_market_alpha.png",
         "title": (
-            "Long-short QUINTILE strategy with log(market-cap)**6-weighted legs, "
-            "regressed on the industry return\n(long top quintile / short bottom "
-            "quintile; within each leg w_i ∝ log(USD market cap)⁶;  "
-            "ls_t = α + β·industry_t + ε,  α = industry-neutral monthly return, "
-            "t-stat tests α ≠ 0)"),
+            "Long-short QUINTILE strategy (repositioned QUARTERLY) with "
+            "log(market-cap)**6-weighted legs, regressed on the industry return\n"
+            "(long top quintile / short bottom quintile; within each leg "
+            "w_i ∝ log(USD market cap)⁶;  ls_t = α + β·industry_t + ε,  "
+            "α = industry-neutral monthly return, t-stat tests α ≠ 0)"),
     },
 ]
 
@@ -194,18 +217,20 @@ def scaled_legs(panel: pd.DataFrame, factor: str, raw_weight, n: int = N_QUINTIL
     unnormalised weight) and normalised to sum to one inside its leg each month.
 
     The even quintile sort and the within-month return winsorisation come from the
-    shared :func:`factors.prepare_slice`; the market cap is the ``weight`` column
-    the panel already carries (formation-date USD cap).  Names whose weight is not
-    finite and positive cannot be sized and drop out (the panel is market-cap
-    screened, so this is rare) -- the surviving names' weights are renormalised to
-    sum to one.
+    shared :func:`factors.prepare_slice`, held **quarterly** with
+    :func:`quarter_position.quarter_held_membership` (buckets formed at each
+    end-Feb/May/Aug/Nov reposition date, held three months); the market cap is the
+    ``weight`` column the panel already carries (formation-date USD cap).  Names whose
+    weight is not finite and positive cannot be sized and drop out (the panel is
+    market-cap screened, so this is rare) -- the surviving names' weights are
+    renormalised to sum to one.
     """
-    sub = F.prepare_slice(panel, factor, n)
+    held = _qp.quarter_held_membership(F.prepare_slice(panel, factor, n))
     caps = (panel.loc[panel["factor"] == factor, ["date", "stock_id", "weight"]]
                  .drop_duplicates(["date", "stock_id"]))
-    legs = (sub.loc[sub["quintile"].isin([1.0, float(n)])]
+    legs = (held.loc[held["leg"].isin([1.0, float(n)])]
                .merge(caps, on=["date", "stock_id"], how="left"))
-    legs["leg"] = np.where(legs["quintile"] == float(n), "top", "bottom")
+    legs["leg"] = np.where(legs["leg"] == float(n), "top", "bottom")
 
     legs["raw_w"] = raw_weight(legs["weight"])
     legs = legs.loc[np.isfinite(legs["raw_w"]) & (legs["raw_w"] > 0)].copy()
@@ -293,8 +318,8 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
 def run(raw_weight, title: str, out_png: Path, label: str) -> pd.DataFrame:
     """Re-evaluate every factor across all sources with cap-weighted quintile books
     (within-leg weighting given by ``raw_weight``), rank by the sum of the
-    full-period and 2016+ alpha t-stats (as ``main.py`` ranks the top factors), and
-    render the whole table to ``out_png``.  Returns the ranked table."""
+    full-period and 2016+ net-of-cost beta-neutral Sharpe ratios (as ``main.py`` ranks
+    the top factors), and render the whole table to ``out_png``.  Returns the ranked table."""
     # One cost panel for the whole run: every software library shares the same
     # Software & Services universe, so the per-(stock, month) costs are identical.
     cost_panel = cost.build_cost_panel(F.SOFTWARE_SERVICES)
@@ -324,8 +349,9 @@ def run(raw_weight, title: str, out_png: Path, label: str) -> pd.DataFrame:
             "subexperiments first (python main.py).")
 
     table = pd.DataFrame(rows)
-    table["alpha_tstat_combined"] = table["alpha_tstat"] + table["alpha_tstat_2016"]
-    table = (table.sort_values("alpha_tstat_combined", ascending=False, kind="stable")
+    table["sharpe_combined"] = (
+        table["sharpe_cost_neutral"] + table["sharpe_cost_neutral_2016"])
+    table = (table.sort_values("sharpe_combined", ascending=False, kind="stable")
                   .reset_index(drop=True))
 
     # Render in the standard alpha-table format, tagging each family with its
@@ -421,13 +447,13 @@ def run_bivariate(factor_names: list[str] | None = None,
     ``return_stability x gross_profitability`` pair) and render a single
     performance table -- the *same* format and metrics as
     ``experiment3 .../bivariate_tertile/<slug>/performance.png`` -- as
-    ``output/bivariate_tertile/<slug>_performance.png``.  Returns the per-window
-    stats dict."""
+    ``output/capacity_scaling/bivariate_scaled/<slug>_performance.png``.  Returns
+    the per-window stats dict."""
     factor_names = list(factor_names) if factor_names else list(_bivariate.DEFAULT_FACTORS)
     if len(factor_names) != 2:
         raise ValueError("bivariate capacity scaling takes exactly two factors; "
                          f"got {len(factor_names)}: {factor_names}")
-    out_root = out_root or (_THIS_DIR / "output" / "capacity_scaling")
+    out_root = out_root or (_THIS_DIR / "output" / "capacity_scaling" / "bivariate_scaled")
     slug = label or "__".join(factor_names)
     out_root.mkdir(parents=True, exist_ok=True)
     out_png = out_root / f"{slug}_performance.png"
@@ -438,7 +464,7 @@ def run_bivariate(factor_names: list[str] | None = None,
                                    for r in resolved.itertuples()))
 
     # Oriented two-factor cross-section + tertile corners, straight from Exp 3.
-    frame, _oriented = _bivariate.double_sorted(resolved)
+    frame = _bivariate.double_sorted(resolved)
     industry = _C.industry_return()
     # Benchmark the double sort against *its own two constituents* (the bivariate
     # legs), not Experiment 3's fixed global list -- the question is whether the

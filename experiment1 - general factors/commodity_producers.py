@@ -10,8 +10,10 @@ This is a thin orchestrator: it adds no new analytics. It simply points the
 existing, universe-parameterised modules at :data:`factors.COMMODITY_PRODUCERS`,
 so every factor definition, z-score, quintile sort and cross-sectional
 regression is exactly the same code as the default run -- only the universe
-and the output location change. Results land in ``output/commodity_producers/``,
-mirroring the default ``output/`` layout one-for-one::
+and the output location change. Like Software & Services, this universe applies
+the bottom-20%-by-cap relative market-cap screen (``min_mcap_pct=0.20``), so the
+cross-section tested is comparable across universes. Results land in
+``output/commodity_producers/``, mirroring the default ``output/`` layout one-for-one::
 
     output/commodity_producers/
       factor_panel.csv

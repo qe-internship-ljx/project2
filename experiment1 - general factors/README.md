@@ -66,6 +66,14 @@ e.g. `python factors.py banks_insurance`.
 - **Universe / industry mean.** The cross-section is the whole Software &
   Services group, so the z-score is `(x - mean) / std` taken across all
   in-group names each month.
+- **Market-cap screen.** Before the sorts, each month drops the **lowest 20% of
+  active names by USD market cap** (`min_mcap_pct = 0.20`, the relative floor in
+  `apply_mcap_screen`), so the strategy trades an investable subset and extreme
+  microcaps do not drive the results. The **same 20% screen is applied to all
+  three universes** — Software & Services, Banks + Insurance and Commodity
+  Producers — so the cross-sections are comparable. (The flat USD floor
+  `min_mcap_usd` is currently 0, i.e. off; set it to re-enable a fixed-dollar
+  floor.)
 - **Point-in-time.** Fundamentals are attached on `observation_date` (when the
   report became observable), *not* `date_fundamental` (the fiscal-period stamp,
   which for ~a third of software stock-months precedes publication). A backward

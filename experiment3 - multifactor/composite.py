@@ -2,32 +2,31 @@
 composite.py
 ============
 
-Experiment 3 -- composite z-score quintile long/short.
+Experiment 3 -- composite z-score long/short, repositioned quarterly.
 
-Combine Experiment 2's **top five factors** -- the top five of the cross-experiment
-ranking ``factor_ranking/monthly_quintile_ranked.csv``, the same candidate set
-``factor_momentum.py`` rotates across -- into one cross-sectional score, the sum of each stock's
-sign-oriented factor z-scores, and run Experiment 1's quintile workflow on that
-composite::
+Combine Experiment 2's **top five factors** -- the top five of the quarterly-
+repositioned cross-experiment ranking (``quarter_position.ranked_factors``, the
+single factor-selection hand-off; the monthly re-evaluation renders comparison
+PNGs only, no ranking CSV) -- into one cross-sectional
+score, the sum of each stock's sign-oriented factor z-scores, and run Experiment 1's
+quintile workflow on that composite::
 
     composite_{i,t} = sum_f  sign_f * zscore_{f,i,t}
 
-Each month the industry cross-section is sorted into five equal-count buckets on
-the composite, the next-period (month t+1) return of each bucket is tracked, and
-the Q5-Q1 long/short book's performance is measured: mean, t-stat, annualised
-Sharpe, the industry-neutral alpha and its t-stat, and the cumulative growth
-path.
+The composite score is formed from each stock's *monthly* cross-sectional z-scores,
+but the book is **repositioned quarterly** (the project-wide convention): buckets are
+formed only at the end of Feb / May / Aug / Nov and held fixed for the three
+following months, via ``quarter_position.quarter_held_membership`` -- the same
+quarterly-holding primitive every Experiment 2-5 book now uses.  The next-period
+(month t+1) return of each held bucket is tracked, and the top-minus-bottom long/short
+book's performance is measured: mean, t-stat, annualised Sharpe, the industry-neutral
+alpha and its t-stat, and the cumulative growth path.
 
 ``sign_f`` orients every factor to its *bullish* direction before summing, read
 from the ``direction`` column of that factor's standalone long/short alpha table
 (``Q5-Q1`` -> +1, long the high-z names;  ``Q1-Q5`` -> -1).  A high composite is
 therefore "attractive across the whole set", so the book is always long Q5 /
 short Q1 and no per-factor sign bookkeeping is left to the caller.
-
-This *replaces* Experiment 3's earlier t-stat-gated multivariate regression:
-there is **no significance gate and no regression model** -- the factor set is
-read from the hand-off and the factors are combined by standardised
-aggregation, the textbook "composite signal" construction.
 
 Design -- maximal reuse, zero duplication of the engine
 -------------------------------------------------------
@@ -49,15 +48,33 @@ Nothing generic is re-implemented:
 This module therefore adds only the *composite construction* and the per-set
 reporting; every input it consumes was produced upstream.
 
-Outputs (``output/composite/``)
--------------------------------
-    quintile_cumulative.png     the five buckets as cumulative growth of $1 (log scale)
-    performance.png             the L/S book's mean / t / Sharpe / industry-neutral alpha /
+The pipeline is run over **three quarterly-repositioned factor selections** -- the
+``quarter_quintile`` ranking (each factor's quarterly QUINTILE book, the project's
+headline hand-off), the ``quarter_tertile`` ranking (its quarterly TERTILE book) and
+the ``quarter_half`` ranking (its quarterly HALF book).  All three slice the top five
+of ``quarter_position.ranked_factors`` for that bucketing; the composite is built
+identically each time -- from the factors' monthly cross-sectional z-scores -- so this
+isolates the effect of *which* five factors a ranking picks (quintile-conviction
+leaders vs tertile-diversity vs half-breadth leaders), not how the composite is scored.
+
+The ``quarter_quintile`` selection's composite is sorted into **quintiles**, the
+``quarter_tertile`` selection's into **tertiles**, and the ``quarter_half``
+selection's into **halves** (top-half-minus-bottom-half of the same z-score sum), so
+the composite is always bucketed the same way its constituents were ranked.
+
+Outputs (``output/composite/<ranking>/``, one subdir per ranking -- ``quarter_quintile`` /
+``quarter_tertile`` / ``quarter_half``)
+-----------------------------------------------------------------------------------------
+    <sort>_cumulative.png       the buckets as cumulative growth of $1 (log scale)
+    <sort>_performance.png      the L/S book's mean / t / Sharpe / industry-neutral alpha /
                                 largest single-name ownership for a $100M book / avg cost
+                                (``<sort>`` = ``quintile`` for ``quarter_quintile``,
+                                ``tertile`` for ``quarter_tertile``, ``half`` for
+                                ``quarter_half``)
 
 Run standalone::
 
-    python composite.py         # always the active top-5 hand-off
+    python composite.py         # all three quarterly rankings' top-5 composites
 """
 
 from __future__ import annotations
@@ -107,13 +124,13 @@ LIBRARIES: list[dict] = [
     _exp2_lib("Skew", "skew factors"),
 ]
 
-# The cross-experiment factor ranking (written by ``experiment2 - sw factors/
-# main.py``, ranking Experiment 1's general market factors together with every
-# Experiment 2 software subexperiment by alpha t-stat).  This is the single
-# hand-off every downstream experiment reads: the top-N consumers slice its
-# leaders via :func:`load_top_factors` / :func:`top_factors`, while modules that
-# sweep the whole candidate set (e.g. Experiment 4's spread timing) read every row.
-RANKED_CSV = EXP2_DIR / "factor_ranking" / "monthly_quintile_ranked.csv"
+# The single factor-selection hand-off is Experiment 2's *quarterly-repositioned*
+# ranking, which ``quarter_position.ranked_factors`` reads from the CSV Experiment 2
+# persists (``factor_ranking/quarter_{label}_ranked.csv``): the top-N consumers slice
+# its leaders, while modules that sweep the whole candidate set (e.g. Experiment 4's
+# timing overlays) read every row.  Re-exported here as :func:`ranked_factors` so
+# Experiment 3-5 modules that already import ``composite`` reach it without importing
+# ``quarter_position`` directly.
 TOP_N = 5
 
 # --------------------------------------------------------------------------- #
@@ -121,6 +138,18 @@ TOP_N = 5
 # --------------------------------------------------------------------------- #
 COMPOSITE_FACTOR = "composite"          # synthetic factor name fed to the reused sort
 N_QUINTILES = 5
+N_TERTILES = 3
+N_HALVES = 2
+# Word for an even ``n``-bucket sort of the composite score, used in filenames and
+# captions (5 -> "quintile", 3 -> "tertile", 2 -> "half"; any other count falls back
+# to "n-bucket").
+_SORT_WORD = {N_QUINTILES: "quintile", N_TERTILES: "tertile", N_HALVES: "half"}
+
+
+def sort_word(n: int) -> str:
+    return _SORT_WORD.get(n, f"{n}-bucket")
+
+
 MONTHS_PER_YEAR = 12
 DECADE_START = pd.Timestamp("2016-01-01")   # "past decade" cut-off (project convention)
 
@@ -165,38 +194,33 @@ def _load_exp1():
 F, Q, R = _load_exp1()
 import cost as COST                       # registered by _load_exp1; the turnover-cost model
 
+# Experiment 2's quarterly-repositioning driver, loaded by path.  It owns the shared
+# quarterly-book primitives (``quarter_held_membership`` / ``quarter_held_spread`` /
+# ``quarter_held_legs``) every Experiment 3-5 book reuses, and the ``ranked_factors``
+# hand-off.  Its own ``import factors / cost / regression`` resolve to the engine
+# just registered above, so the generic engine is shared (no re-load).
+QP = _load("exp2_quarter_position", EXP2_DIR / "quarter_position.py")
+
+
+def ranked_factors(n: int | None = None, label: str = "quintile") -> pd.DataFrame:
+    """The quarterly-repositioned factor-selection hand-off -- a thin re-export of
+    :func:`quarter_position.ranked_factors` (see it).  ``label`` picks the bucketing
+    (``quintile`` book, the headline; ``tertile`` for the tertile-ranked composite);
+    ``n`` keeps the top-``n`` leaders or, when ``None``, every ranked factor."""
+    return QP.ranked_factors(n, label)
+
+
+def _read_factor_panel(path: str | Path) -> pd.DataFrame:
+    """Read a factor library's tidy panel (the columns the quarterly sort needs)."""
+    panel = pd.read_csv(path, parse_dates=["date"],
+                        usecols=["date", "stock_id", "factor", "zscore", "next_return"])
+    panel["stock_id"] = panel["stock_id"].astype(str)
+    return panel
+
 
 # --------------------------------------------------------------------------- #
 # Step 1 -- resolve the requested factors to (source panel, bullish sign)
 # --------------------------------------------------------------------------- #
-def load_top_factors(csv_path: Path = RANKED_CSV, n: int | None = TOP_N) -> pd.DataFrame:
-    """The single top-factor retrieval every downstream experiment shares.
-
-    Reads Experiment 2's factor ranking (``monthly_quintile_ranked.csv``) -- one
-    row per factor carrying its ``factor`` name, source ``subexperiment``, bullish
-    ``direction``, ``family`` and alpha stats -- pre-sorted by industry-neutral
-    alpha t-stat.  ``n`` keeps the top-``n`` leaders (the default, the top-5 book
-    consumers want); ``n=None`` returns every ranked factor (the full-sweep
-    consumers, e.g. Experiment 4's spread timing).
-
-    Reads the *current* file each call, so callers always track whatever factors
-    rank highest after the latest Experiment 1/2 run.  Raises a clear error if the
-    ranking is missing."""
-    if not Path(csv_path).exists():
-        raise FileNotFoundError(
-            f"{csv_path} not found.  Run Experiment 2 first -- `python main.py` "
-            "(or `python main.py collect`) in 'experiment2 - sw factors' writes "
-            "the factor ranking.")
-    ranked = pd.read_csv(csv_path)
-    return (ranked if n is None else ranked.head(n)).reset_index(drop=True)
-
-
-def top_factors(csv_path: Path = RANKED_CSV, n: int = TOP_N) -> list[str]:
-    """The active top-``n`` factor names, in rank order -- a thin name view over
-    :func:`load_top_factors`."""
-    return load_top_factors(csv_path, n)["factor"].tolist()
-
-
 def resolve_factors(factor_names: list[str]) -> pd.DataFrame:
     """
     Map each requested factor to its source library, family, bullish sign and
@@ -233,37 +257,22 @@ def resolve_factors(factor_names: list[str]) -> pd.DataFrame:
                                        "sign", "alpha", "alpha_tstat", "panel_path"])
 
 
-def factor_quintile_dir(factor: str) -> Path:
-    """Locate a factor's ``quintile/`` output directory -- the parent of the
-    library alpha table that lists it.  Resolves factors from Experiment 1
-    (general market factors) and any Experiment 2 software subexperiment alike,
-    so a standalone book written by either experiment is found.  Raises if the
-    factor is in no library."""
-    for lib in LIBRARIES:
-        ap = Path(lib["alpha"])
-        if ap.exists() and factor in set(pd.read_csv(ap, usecols=["factor"])["factor"]):
-            return ap.parent
-    raise KeyError(f"factor {factor!r} not found in any library alpha table "
-                   f"({', '.join(l['label'] for l in LIBRARIES)}).")
-
-
 def factor_long_short(factor: str) -> pd.Series:
     """
-    A single factor's bullish-oriented standalone monthly long/short return,
-    read from its ``quintile/<factor>/quintile_returns.csv`` (the ``Q5-Q1``
-    column) and signed by its bullish ``direction`` (``+`` when the book is long
-    the top z-score quintile, ``-`` otherwise).  Indexed by formation month.
+    A single factor's bullish-oriented **quarterly-repositioned** standalone
+    long/short return, indexed by formation month.
 
-    This is the exact dollar-neutral book each factor's published ``long_short.png``
-    tracks, so it is the natural benchmark to regress another strategy against;
-    no return is recomputed here.  Shared by ``factor_momentum.py`` (rotation
-    candidates) and ``bivariate_tertile.py`` (benchmark-relative alpha).
+    Computed from the factor's source ``factor_panel.csv`` via the shared
+    ``quarter_position.quarter_held_spread`` (buckets formed quarterly, held three
+    months), oriented by its bullish ``sign`` -- the exact quarterly dollar-neutral
+    book every other Experiment 2-5 book now trades, so it is the natural benchmark
+    to regress another strategy against.  Shared by ``factor_momentum.py`` (rotation
+    candidates) and ``bivariate_tertile.py`` / ``weighted_composite.py``
+    (benchmark-relative alpha).
     """
-    sign = int(resolve_factors([factor]).iloc[0]["sign"])
-    qr_path = factor_quintile_dir(factor) / factor / "quintile_returns.csv"
-    qr = (pd.read_csv(qr_path, parse_dates=["date"])
-            .set_index("date").sort_index())
-    return (sign * qr["Q5-Q1"]).rename(factor)
+    meta = resolve_factors([factor]).iloc[0]
+    panel = _read_factor_panel(meta["panel_path"])
+    return QP.quarter_held_spread(panel, factor, int(meta["sign"])).rename(factor)
 
 
 # --------------------------------------------------------------------------- #
@@ -357,6 +366,29 @@ def as_factor_panel(composite: pd.DataFrame) -> pd.DataFrame:
     return panel
 
 
+def bucket_returns(panel: pd.DataFrame, n: int = N_QUINTILES,
+                   factor: str = COMPOSITE_FACTOR) -> pd.DataFrame:
+    """Wide monthly table of each composite-score bucket's mean next-period return
+    plus the top-minus-bottom (``Q{n}-Q1``) long/short spread, for an even
+    ``n``-bucket sort (``n=5`` quintiles, ``n=3`` tertiles), **repositioned quarterly**.
+
+    Even-count buckets are formed at each reposition date via
+    ``factors.prepare_slice`` and held fixed for the quarter with
+    ``quarter_position.quarter_held_membership`` (the shared quarterly primitive),
+    then the held bucket's mean next-period return is tracked -- the quarterly,
+    bucket-count-generic counterpart of Experiment 1's ``quintile.quintile_returns``,
+    so the composite is tracked in tertiles as well as quintiles with no new code."""
+    cols = [f"Q{i}" for i in range(1, n + 1)]
+    held = QP.quarter_held_membership(F.prepare_slice(panel, factor, n))
+    wide = (held.pivot_table(index="date", columns="leg",
+                             values="next_return", aggfunc="mean")
+                .rename(columns={i: f"Q{i}" for i in range(1, n + 1)})
+                .sort_index()
+                .reindex(columns=cols))
+    wide[f"Q{n}-Q1"] = wide[f"Q{n}"] - wide["Q1"]
+    return wide
+
+
 # --------------------------------------------------------------------------- #
 # Step 3 -- long/short performance (reusing the engine's alpha definition)
 # --------------------------------------------------------------------------- #
@@ -430,14 +462,12 @@ def window_cost(cost_series: pd.Series,
 # --------------------------------------------------------------------------- #
 def quintile_legs(panel: pd.DataFrame, factor: str = COMPOSITE_FACTOR,
                   n_quintiles: int = N_QUINTILES) -> pd.DataFrame:
-    """Equal-weighted top (long) / bottom (short) quintile leg membership of a
-    scored ``panel`` as a ``date, stock_id, leg, w`` frame -- the *same* monthly
-    quintile membership :func:`cost.long_short_cost` charges, reused here so the
-    ownership diagnostic sizes exactly the names the book trades."""
-    sub = F.prepare_slice(panel, factor, n_quintiles)
-    legs = sub.loc[sub["quintile"].isin([1.0, float(n_quintiles)]),
-                   ["date", "stock_id", "quintile"]].rename(columns={"quintile": "leg"})
-    return COST.equal_weight_legs(legs)
+    """Equal-weighted top (long) / bottom (short) bucket leg membership of a scored
+    ``panel`` as a ``date, stock_id, leg, w`` frame, **repositioned quarterly** -- a
+    thin call to ``quarter_position.quarter_held_legs``, the same quarterly-held
+    membership :func:`bucket_returns` trades, so the cost and ownership diagnostics
+    size exactly the names the book holds."""
+    return QP.quarter_held_legs(panel, factor, n_quintiles)
 
 
 def leg_ownership(legs: pd.DataFrame) -> pd.Series:
@@ -541,63 +571,35 @@ def attach_net_cost_sharpe(stats: dict, spread: pd.Series, cost_series: pd.Serie
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
-QCOLS = [f"Q{i}" for i in range(1, N_QUINTILES + 1)]
-
-
 def _set_label(factor_names: list[str]) -> str:
     return " + ".join(factor_names)
 
 
 def plot_cumulative(wide: pd.DataFrame, factor_names: list[str], path: Path,
                     score_desc: str = "sum of z-scores",
-                    boundary: pd.Timestamp | None = None) -> None:
-    """Cumulative growth of $1 in each composite quintile (log scale).
+                    boundary: pd.Timestamp | None = None,
+                    n_buckets: int = N_QUINTILES) -> None:
+    """Cumulative growth of $1 in each composite bucket (log scale).
 
-    ``score_desc`` labels how the composite was built; ``boundary``, if given,
-    draws a vertical rule (e.g. an in-sample / out-of-sample split).
+    ``n_buckets`` sets the even sort (5 = quintiles, 3 = tertiles); ``score_desc``
+    labels how the composite was built; ``boundary``, if given, draws a vertical
+    rule (e.g. an in-sample / out-of-sample split).
     """
-    cum = (1.0 + wide[QCOLS].fillna(0.0)).cumprod()
+    cols = [f"Q{i}" for i in range(1, n_buckets + 1)]
+    word = sort_word(n_buckets)
+    cum = (1.0 + wide[cols].fillna(0.0)).cumprod()
     fig, ax = plt.subplots(figsize=(11, 5))
-    for q in QCOLS:
+    for q in cols:
         ax.plot(cum.index, cum[q], label=q, linewidth=1.3)
     if boundary is not None:
         ax.axvline(boundary, color="black", linestyle="--", linewidth=0.9, alpha=0.7)
     ax.set_yscale("log")
-    ax.set_title("Cumulative growth of $1 by composite-score quintile\n"
+    ax.set_title(f"Cumulative growth of $1 by composite-score {word}\n"
                  f"composite = {score_desc}: {_set_label(factor_names)}")
     ax.set_xlabel("Month")
     ax.set_ylabel("Cumulative value (log scale)")
-    ax.legend(title="Quintile", ncol=5, loc="upper left", fontsize=8)
+    ax.legend(title=word.capitalize(), ncol=len(cols), loc="upper left", fontsize=8)
     ax.grid(True, alpha=0.3, which="both")
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
-
-
-def plot_long_short(spread: pd.Series, factor_names: list[str], sharpe: float,
-                    alpha: float, alpha_tstat: float, path: Path,
-                    boundary: pd.Timestamp | None = None,
-                    stat_window: str = "") -> None:
-    """Cumulative growth of $1 in the dollar-neutral Q5-Q1 composite book.
-
-    ``boundary`` draws a vertical rule (e.g. the IS/OOS split); ``stat_window``
-    annotates which window the header Sharpe / alpha refer to.
-    """
-    cum = (1.0 + spread.fillna(0.0)).cumprod()
-    fig, ax = plt.subplots(figsize=(11, 5))
-    ax.plot(cum.index, cum, color="C2", linewidth=1.3)
-    ax.axhline(1.0, color="black", linewidth=0.6)
-    if boundary is not None:
-        ax.axvline(boundary, color="black", linestyle="--", linewidth=0.9, alpha=0.7)
-    win = f"  {stat_window}" if stat_window else ""
-    ax.set_title("Dollar-neutral composite long-short (long Q5 / short Q1): "
-                 "cumulative growth of $1\n"
-                 f"{_set_label(factor_names)}  "
-                 f"[Sharpe={sharpe:+.2f}, alpha={alpha:+.4%}/mo, "
-                 f"t(alpha)={alpha_tstat:+.2f}{win}]")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Cumulative value of $1")
-    ax.grid(True, alpha=0.3)
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)
@@ -704,22 +706,54 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
 
 
 # --------------------------------------------------------------------------- #
+# Factor selections -- the three quarterly rankings the composite is run over
+#
+# The composite is always built from each constituent's *monthly* cross-sectional
+# z-scores (:func:`load_exposures`); a ranking only decides *which* five factors go
+# in.  All three selections come from Experiment 2's quarterly-repositioned hand-off
+# (:func:`ranked_factors`): the ``quarter_quintile`` ranking (each factor's quarterly
+# QUINTILE book), the ``quarter_tertile`` ranking (its quarterly TERTILE book) and the
+# ``quarter_half`` ranking (its quarterly HALF book).  Running the composite over each
+# answers "which five factors does the quintile-vs-tertile-vs-half book pick, and does
+# the composite still lead under any selection?".
+# --------------------------------------------------------------------------- #
+# ranking name -> (hand-off bucketing label, zero-arg provider of its top-``TOP_N``
+# factor names in rank order).
+RANKINGS: dict = {
+    "quarter_quintile": lambda: ranked_factors(TOP_N, "quintile")["factor"].tolist(),
+    "quarter_tertile": lambda: ranked_factors(TOP_N, "tertile")["factor"].tolist(),
+    "quarter_half": lambda: ranked_factors(TOP_N, "half")["factor"].tolist(),
+}
+
+
+# --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def run(out_root: Path = OUTPUT_DIR) -> dict:
+def run(ranking: str = "quarter_quintile",
+        factor_names: list[str] | None = None,
+        n_buckets: int = N_QUINTILES,
+        out_root: Path = OUTPUT_DIR) -> dict:
     """
-    Run the straight-sum composite pipeline on the active top-five factors
-    (the top five of Experiment 2's ``monthly_quintile_ranked.csv`` ranking, the
-    same candidate set ``factor_momentum.py`` rotates across) and write the two outputs --
-    ``quintile_cumulative.png`` and ``performance.png`` -- under
-    ``out_root / "composite"``.  Returns the per-window performance dict.
+    Run the straight-sum composite pipeline for one ranking's top factors and write
+    its two outputs -- ``<sort>_cumulative.png`` and ``<sort>_performance.png``
+    (``<sort>`` = ``quintile`` / ``tertile`` / ``half``) -- under
+    ``out_root / "composite" / ranking``.  The book is repositioned quarterly.
+    Returns the per-window performance dict.
+
+    ``ranking`` names the factor selection (a key of :data:`RANKINGS`, default the
+    headline ``quarter_quintile`` hand-off); ``factor_names`` overrides the list
+    (default: that ranking's top ``TOP_N``).  ``n_buckets`` sets the composite sort
+    (5 = quintile of the z-score sum, 3 = tertile, 2 = half); each ranking is run with
+    the one sort it was ranked by (see :func:`_sort_for`).
     """
-    factor_names = top_factors()
+    if factor_names is None:
+        factor_names = RANKINGS[ranking]()
     resolved = resolve_factors(factor_names)
-    out_dir = out_root / "composite"
+    word, spread_col = sort_word(n_buckets), f"Q{n_buckets}-Q1"
+    out_dir = out_root / "composite" / ranking
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=== Experiment 3: composite z-score quintile L/S ===")
+    print(f"=== Experiment 3: composite z-score {word} L/S [{ranking}] ===")
     print(f"Factors ({len(factor_names)}): " +
           ", ".join(f"{r.factor} [{'+' if r.sign > 0 else '-'}]"
                     for r in resolved.itertuples()))
@@ -728,9 +762,9 @@ def run(out_root: Path = OUTPUT_DIR) -> dict:
     composite, _ = load_composite(resolved)
     panel = as_factor_panel(composite)
 
-    # 3. Quintile sort (Experiment 1's code, unmodified).
-    wide = Q.quintile_returns(panel, COMPOSITE_FACTOR)
-    spread = wide["Q5-Q1"]
+    # 3. Even n-bucket sort of the composite (Experiment 1's slice, unmodified).
+    wide = bucket_returns(panel, n_buckets)
+    spread = wide[spread_col]
 
     # 4. Long/short performance over the full sample and the past decade.
     industry = industry_return()
@@ -738,9 +772,9 @@ def run(out_root: Path = OUTPUT_DIR) -> dict:
                ("Past decade (2016+)", book_stats(spread, industry, start=DECADE_START))]
     full, decade = windows[0][1], windows[1][1]
 
-    # Average monthly turnover cost of the Q5-Q1 book (reported, not netted) plus
-    # the cost-incorporated Sharpe (raw + β-neutral) derived from the same series.
-    legs = quintile_legs(panel)
+    # Average monthly turnover cost of the top-minus-bottom book (reported, not
+    # netted) plus the cost-incorporated Sharpe (raw + β-neutral) from the same series.
+    legs = quintile_legs(panel, n_quintiles=n_buckets)
     cost_series = COST.turnover_cost(legs, cost_panel())
     full["avg_cost"] = window_cost(cost_series)
     decade["avg_cost"] = window_cost(cost_series, start=DECADE_START)
@@ -748,7 +782,7 @@ def run(out_root: Path = OUTPUT_DIR) -> dict:
     attach_net_cost_sharpe(decade, spread, cost_series, industry, start=DECADE_START)
 
     # Largest single-name ownership for a $100M dollar-neutral book (worst-case per
-    # window), sized from the same Q5/Q1 leg membership the cost uses.
+    # window), sized from the same top/bottom leg membership the cost uses.
     ownership = leg_ownership(legs)
     attach_ownership(full, ownership)
     attach_ownership(decade, ownership, start=DECADE_START)
@@ -757,21 +791,24 @@ def run(out_root: Path = OUTPUT_DIR) -> dict:
             "start": composite["date"].min(), "end": composite["date"].max()}
 
     # --- Persist outputs --------------------------------------------------- #
-    plot_cumulative(wide, factor_names, out_dir / "quintile_cumulative.png")
+    plot_cumulative(wide, factor_names, out_dir / f"{word}_cumulative.png",
+                    n_buckets=n_buckets)
     render_performance(
-        windows, "Composite long-short (Q5-Q1) performance",
+        windows,
+        f"Composite {word} long-short ({spread_col}) performance -- {ranking} top-{TOP_N}",
         f"{_set_label(factor_names)}   |   {meta['n_stocks']} stocks over "
         f"{meta['n_months']} months ({meta['start']:%Y-%m} .. {meta['end']:%Y-%m})   |   "
         "α from regressing the book on the market-cap-weighted industry return.   "
         "Shading: |t| ≥ 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png",
+        out_dir / f"{word}_performance.png",
         extra_metrics=[ownership_metric()])
 
     # --- Console summary --------------------------------------------------- #
-    qmeans = {q: wide[q].mean() for q in QCOLS}
-    print("  quintile mean next-month return: " +
-          "  ".join(f"{q}={qmeans[q]:+.3%}" for q in QCOLS))
-    print(f"  Q5-Q1 long/short: {full['mean_monthly']:+.4%}/mo "
+    cols = [f"Q{i}" for i in range(1, n_buckets + 1)]
+    qmeans = {q: wide[q].mean() for q in cols}
+    print(f"  {word} mean next-month return: " +
+          "  ".join(f"{q}={qmeans[q]:+.3%}" for q in cols))
+    print(f"  {spread_col} long/short: {full['mean_monthly']:+.4%}/mo "
           f"(t={full['tstat']:+.2f}, Sharpe={full['sharpe']:+.2f})")
     print(f"  industry-neutral alpha: {full['alpha']:+.4%}/mo "
           f"(t={full['alpha_tstat']:+.2f}, ind beta={full['ind_beta']:+.2f})")
@@ -779,9 +816,28 @@ def run(out_root: Path = OUTPUT_DIR) -> dict:
     print(f"Saved -> {out_dir}")
     return {lbl: s for lbl, s in windows}
 
+def _sort_for(ranking: str) -> int:
+    if "tertile" in ranking:
+        return N_TERTILES
+    if "half" in ranking:
+        return N_HALVES
+    return N_QUINTILES
+
+
+def run_all(out_root: Path = OUTPUT_DIR) -> dict:
+    """Run the composite pipeline over all rankings in :data:`RANKINGS` -- the
+    ``quarter_quintile``, ``quarter_tertile`` and ``quarter_half``
+    quarterly-repositioned hand-offs.
+
+    Each ranking's top factors are sorted the one way they were ranked
+    (:func:`_sort_for`: quintile / tertile / half).  Returns ``{ranking: per-window
+    performance dict}``."""
+    return {ranking: run(ranking, RANKINGS[ranking](), _sort_for(ranking), out_root)
+            for ranking in RANKINGS}
+
 
 def main() -> None:
-    run()
+    run_all()
 
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ Run standalone to (re)build the panel::
 
 To run the full pipeline (panel + quintile sorts + regressions) use the driver::
 
-    python main.py
+    python monthly_position.py
 """
 
 from __future__ import annotations

@@ -37,12 +37,18 @@ with **no change to Experiment 1**.
 
 ```
 sw_factors.py          # software factor library (drop-in for the engine's interface)
-main.py                # driver: wires sw_factors -> 'factors', runs quintile + regression,
-                       #   then the software subexperiments, then the top-factor collection
+monthly_position.py    # driver + monthly re-evaluation (was main.py + tertile.py):
+                       #   wires sw_factors -> 'factors', runs quintile + regression, then the
+                       #   software subexperiments, then the top-factor collection -- re-evaluating
+                       #   EVERY factor with monthly QUINTILE (Q5-Q1), TERTILE (T3-T1) and HALF (H2-H1)
+                       #   books (monthly_quintile.png / monthly_tertile.png / monthly_half.png).
+                       #   Owns the shared machinery (SOURCES, evaluate_all, alpha_row, render_ranked)
 driver_utils.py        # shared driver boilerplate (engine wiring, pipeline, redundancy step)
-tertile.py             # re-evaluates EVERY factor with tertile (T3-T1) books instead of quintiles
-quarter_position.py    # re-evaluates EVERY factor with QUINTILE and TERTILE books repositioned QUARTERLY
-                       #   (form new buckets only end of Feb/May/Aug/Nov, hold 3 months) -> lower turnover cost
+quarter_position.py    # re-evaluates the SAME factors with QUINTILE, TERTILE and HALF books repositioned
+                       #   QUARTERLY (form new buckets only end of Feb/May/Aug/Nov, hold 3 months) -> lower
+                       #   turnover cost. Reuses monthly_position's SOURCES / evaluate_all / alpha_row /
+                       #   render_ranked, supplying only the quarterly book. + a QUARTERLY cross-section
+                       #   regression: next-quarter return on factor z-score -> quarter_regression.png
 Standard/              # established §2.2 factors (outputs of sw_factors.py)
     factor_panel.csv
     quintile/   <factor>/{quintile_returns.csv, quintile_cumulative.png, long_short.png}
@@ -54,13 +60,35 @@ RD/                    # R&D-behaviour factor library (rd_factors.py + main_rd.p
 Stability/             # fundamental-consistency factor library (stability_factors.py + main_stability.py)
 Skew/                  # return/growth skewness factor library (skew_factors.py + main_skew.py)
 Cross_val/             # re-test of the top factors on Banks+Insurance+Commodity Producers
-factor_ranking/        # cross-subexperiment ranking + hand-off for Experiments 3-5
+factor_ranking/        # rendered all-factor alpha tables (monthly/quarter x quintile/tertile/half)
 ```
+
+The **factor-selection hand-off** Experiments 3–5 read is a persisted CSV: running
+`quarter_position.py` writes each bucketing's ranked table to
+`factor_ranking/quarter_{quintile,tertile,half}_ranked.csv`, and
+`quarter_position.ranked_factors(n, "quintile"|"tertile"|"half")` reads it back
+(top-`n` or all) — so a downstream process resolves the leaders with a plain
+`read_csv`, without re-running the whole-universe re-evaluation (or wiring the engine)
+in every process. If the CSV is missing (this module was never run standalone),
+`ranked_factors` computes and persists it once, so the hand-off is self-bootstrapping.
+The CSVs are regenerable build artifacts (gitignored, like every `factor_panel.csv`).
+Alongside them `factor_ranking/` holds the rendered comparison tables — one per
+repositioning frequency × bucketing: `monthly_{quintile,tertile,half}.png` and
+`quarter_{quintile,tertile,half}.png`, plus `quarter_regression.png` (the quarterly
+cross-section regression, below).
+
+`quarter_regression.png` is the quarterly counterpart of each subexperiment's
+`regression/summary_table.png`: at every reposition date (end of Feb/May/Aug/Nov) it
+regresses each stock's **next-quarter** return on its factor z-score, and reports the
+mean quarterly β (the factor premium, return per 1σ) with its Fama–MacBeth t-stat,
+full period and 2016+, ranking every factor by the sum of the two t-stats — the same
+statistic `summary_table.png` reports, on the held-quarterly calendar rather than
+monthly.
 
 Each subexperiment folder mirrors `Standard/`'s layout (`factor_panel.csv`,
 `quintile/`, `regression/`, `factor_correlation/`) and is driven by its own
 `main_*.py`, which injects its factor library into the shared Experiment 1
-engine via `driver_utils.wire_engine` — exactly as `main.py` does for
+engine via `driver_utils.wire_engine` — exactly as `monthly_position.py` does for
 `sw_factors.py`. The build → quintile → regression → redundancy flow itself is
 `driver_utils.run_pipeline`; each driver keeps only its library, universe and
 labels.
@@ -75,25 +103,32 @@ labels.
 | `Skew/` | `skew_factors.py` | `return_skewness`, `revenue_growth_skewness`, `eps_skewness` (all long-low: lottery/lumpiness aversion) |
 | `Cross_val/` | `crossval_factors.py` | re-tests the top `TOP_N` ranked factors on the **Banks + Insurance + Commodity Producers** universe (excluded from the ranking — different cross-section) |
 
-After all subexperiments finish, `main.py` **collects** every
-`quintile/long_short_market_alpha.csv` (Experiment 1's general factors on the
-software universe + every software subexperiment), ranks all factors by the sum
-of their full-period and 2016+ alpha t-stats, and writes the single ranking
-consumed by Experiments 3–5 to `factor_ranking/`:
-`monthly_quintile_ranked.csv` (every factor, ranked — each downstream experiment
-slices its own top N) and the rendered alpha tables.
+After all subexperiments finish, `monthly_position.py` **collects** every
+factor (Experiment 1's general factors on the software universe + every software
+subexperiment), ranks all factors by the sum of their full-period and 2016+
+net-of-cost beta-neutral Sharpe ratios, and renders the monthly-quintile
+comparison table `factor_ranking/monthly_quintile.png` plus the same factors'
+coarser monthly books (`monthly_tertile.png`, `monthly_half.png`) in the identical
+format (all three via its shared `run_all`). The **hand-off consumed by
+Experiments 3–5** is the *quarterly-repositioned* ranking, persisted by
+`quarter_position.py` to `factor_ranking/quarter_{label}_ranked.csv` and read back via
+`quarter_position.ranked_factors` (buckets formed only end of Feb/May/Aug/Nov, held
+three months) — chosen because quarterly repositioning is cheaper and empirically
+slightly stronger across the leaders; see the report. Each downstream
+experiment slices its own top N from it.
 
 ## Run
 
 ```bash
-python main.py            # Standard pipeline + software subexperiments + top-factor collection
-python main.py collect    # only (re)collect the top factors from existing CSVs
-python Cross_val/main_crossval.py   # run manually AFTER the collection (reads monthly_quintile_ranked.csv)
+python monthly_position.py          # Standard pipeline + software subexperiments + monthly quintile/tertile/half tables
+python monthly_position.py collect  # only (re)render the monthly quintile/tertile/half tables from existing CSVs
+python Cross_val/main_crossval.py   # run manually (resolves its top factors via quarter_position.ranked_factors)
 python sw_factors.py      # rebuild the Standard factor panel only
-python tertile.py         # tertile re-evaluation -> factor_ranking/monthly_tertile.png
-python quarter_position.py  # quarterly-repositioned re-evaluation (end Feb/May/Aug/Nov), quintile + tertile
-                            #   -> factor_ranking/quarter_quintile.png (quintile)
-                            #   -> factor_ranking/quarter_tertile.png  (tertile)
+python quarter_position.py  # quarterly-repositioned re-evaluation (end Feb/May/Aug/Nov), quintile + tertile + half
+                            #   -> factor_ranking/quarter_{quintile,tertile,half}.png
+                            #   + quarter_{quintile,tertile,half}_ranked.csv (the persisted Exp 3-5 / Cross_val hand-off)
+                            #   + quarter_regression.png (quarterly cross-section regression of next-quarter return)
+                            #   ranked_factors() reads those CSVs back
 ```
 
 ## Factors

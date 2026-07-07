@@ -22,28 +22,31 @@ Both the spread at ``t`` and its trailing average are known at ``t`` (they are
 formation-date characteristics, not returns), so the rule is strictly look-ahead
 free.  Because exiting and re-entering the book is itself a trade, the **turnover
 cost** of the timing overlay is charged explicitly (full liquidation on exit,
-re-establishment on re-entry) and the timed book is compared to the always-on
-book on an after-cost basis, over the common sample where the signal is defined.
+re-establishment on re-entry) and the timed book is reported on an after-cost
+basis, over the common sample where the signal is defined.
 
-The candidate factors are exactly Experiment 2's FULL cross-experiment ranking
-(``experiment2 - sw factors/factor_ranking/monthly_quintile_ranked.csv`` -- every factor
-in ``monthly_quintile.png``, not just the top five), so
-re-running Experiment 2's ``collect`` step re-points this module automatically.
+The candidate factors are exactly Experiment 2's FULL quarterly-repositioned
+cross-experiment ranking (``quarter_position.ranked_factors`` with ``n=None`` --
+every ranked factor, not just the top five), so re-running Experiment 2 re-points
+this module automatically.  The base book each overlay gates is the factor's
+**quarterly-repositioned** Q5-Q1 book (the project-wide convention); the factor-value
+spread signal and the in/out gate remain monthly.
 
 Engine reuse (the project's dependency-injection convention)
 ------------------------------------------------------------
 Nothing generic is re-implemented:
 
-* each factor's signed Q5-Q1 long/short return is read through
-  ``factor_momentum.signed_spread`` (the published ``quintile_returns.csv``,
+* each factor's signed quarterly Q5-Q1 long/short return is the shared
+  ``factor_momentum.signed_spread`` (``quarter_position.quarter_held_spread``,
   oriented by the factor's bullish ``direction``) -- no return is recomputed;
 * every performance statistic (industry-neutral alpha + t, industry beta,
   beta-neutral Sharpe) comes from ``composite.book_stats`` / ``industry_return``,
   so "alpha" is defined identically to every other long/short book in the project;
-* the trading cost is Experiment 1's ``cost.long_short_cost`` -- extended once,
-  backward-compatibly, with an ``active`` mask so it can price the timing overlay;
+* the trading cost is ``cost.turnover_cost`` on the factor's quarterly-held legs
+  (``quarter_position.quarter_held_legs``) with an ``active`` mask so it prices the
+  timing overlay's exit / re-entry churn;
 * the quintile membership and within-month winsorisation behind the value spread
-  are Experiment 1's ``factors.prepare_slice`` / ``winsorize_cross_section``.
+  signal are Experiment 1's ``factors.prepare_slice`` / ``winsorize_cross_section``.
 
 This module adds **only** the value-spread timing signal and its evaluation.
 
@@ -55,10 +58,13 @@ The single output is one consolidated performance table under
 ``experiment4 - timing/output/``:
 
     spread_timing_performance.png  ONE consolidated performance table (project house
-                                   style, one row per factor x book): gross (cost-free)
+                                   style, one row per factor -- the spread-timed book):
+                                   gross (cost-free)
                                    L/S & beta-neutral Sharpe, the combined after-cost
-                                   ("Sharpe net cost") Sharpe, industry-neutral alpha
-                                   & beta, average cost -- full sample and 2016+
+                                   ("Sharpe net cost") Sharpe, the % activation (share
+                                   of months the spread gate holds the book),
+                                   industry-neutral alpha & beta, average cost --
+                                   full sample and 2016+
 """
 
 from __future__ import annotations
@@ -85,7 +91,6 @@ F = C.F                      # the Experiment 1 engine, wired for the software u
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-CANDIDATES_CSV = C.RANKED_CSV                 # the FULL ranking (loaded with n=None below)
 LOOKBACK = 6                                  # trailing months for the spread average
 N_QUINTILES = C.N_QUINTILES
 DECADE_START = C.DECADE_START                 # 2016-01-01, the project "past decade" cut-off
@@ -135,7 +140,7 @@ def timing_flags(spread: pd.Series, lookback: int = LOOKBACK
 
 
 # --------------------------------------------------------------------------- #
-# Step 2 -- build & evaluate one factor's always-on vs timed book (after cost)
+# Step 2 -- build & evaluate one factor's timed book (after cost)
 # --------------------------------------------------------------------------- #
 def _win(s: pd.Series, start: pd.Timestamp | None) -> pd.Series:
     return s if start is None else s[s.index >= start]
@@ -148,18 +153,18 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
                     panel: pd.DataFrame, cost_panel: pd.DataFrame,
                     industry: pd.Series) -> pd.DataFrame:
     """
-    Build the always-on and spread-timed books for one factor and tabulate their
-    gross and after-cost performance over the full sample and 2016+.
+    Build the spread-timed book for one factor and tabulate its gross and after-cost
+    performance over the full sample and 2016+.
 
-    Returns the tidy ``comparison`` stats table (one row per book x window): the
-    gross (cost-free) mean / t / Sharpe / industry-neutral alpha & beta, and the
+    Returns the tidy ``comparison`` stats table (one row per window): the gross
+    (cost-free) mean / t / Sharpe / industry-neutral alpha & beta, and the
     net-of-cost (after-cost) counterparts, plus the average turnover cost and the
     fraction of months in market.  The market-alpha regression (gross and net) is
     estimated over the in-market months only, so the timed book's alpha is not
     diluted by the exact-zero cash months; mean / t / Sharpe still cover the full
     timed series including those months.
     """
-    gross = FM.signed_spread(subexperiment, factor, direction)        # bullish Q5-Q1 book
+    gross = FM.signed_spread(panel, factor, direction)                # bullish quarterly Q5-Q1 book
     spread = value_spread(panel, factor)
     trailing, _ = timing_flags(spread)
 
@@ -171,22 +176,26 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
     flag = spread.reindex(eval_index) > trailing.reindex(eval_index)
     timed_gross = base.where(flag, 0.0)                                # cash (0) when out of market
 
-    # Turnover cost: always-on (continuous) vs the timing overlay (exit/re-enter).
-    cost_always = COST.long_short_cost(panel, factor, cost_panel).reindex(eval_index).fillna(0.0)
-    cost_timed = COST.long_short_cost(panel, factor, cost_panel, active=flag).reindex(eval_index).fillna(0.0)
+    # Turnover cost of the timing overlay on the factor's quarterly-held legs (exit
+    # on the out-of-market months, re-enter): the ``active`` mask charges the full
+    # liquidation on exit and re-establishment on entry over the quarterly membership.
+    legs = C.QP.quarter_held_legs(panel, factor, N_QUINTILES)
+    leg_dates = pd.Index(sorted(legs["date"].unique()), name="date")
+    cost_timed = (COST.turnover_cost(legs, cost_panel, leg_dates, active=flag)
+                      .reindex(eval_index).fillna(0.0))
 
     books = {
-        "always_on": (base, cost_always, pd.Series(True, index=eval_index)),
-        "timed":     (timed_gross, cost_timed, flag),
+        "timed": (timed_gross, cost_timed, flag),
     }
 
     rows = []
     for book, (gross_s, cost_s, active_s) in books.items():
         net_s = gross_s - cost_s
-        # The market-alpha regression uses only the in-market months: an
-        # out-of-market month is cash (an exact 0 with no industry exposure), so
-        # including it would mechanically shrink both alpha and beta toward zero.
-        # For the always-on book the mask is all-True and rg/rn coincide with sg/sn.
+        # The market-alpha regression AND the beta-neutral Sharpe use only the
+        # in-market months: an out-of-market month is cash (an exact 0 with no
+        # industry exposure), so including it would mechanically shrink alpha and
+        # beta toward zero and drag the neutralised Sharpe below what a significant
+        # alpha implies (the zero months dilute the mean but not the volatility).
         reg_gross, reg_net = gross_s[active_s], net_s[active_s]
         for win_name, start in WINDOWS:
             sg = C.book_stats(gross_s, industry, start=start)
@@ -199,12 +208,12 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
                 "gross_sharpe": sg["sharpe"], "gross_alpha": rg["alpha"],
                 "gross_alpha_tstat": rg["alpha_tstat"],
                 "ind_beta": rg["ind_beta"], "ind_beta_tstat": rg["ind_beta_tstat"],
-                "sharpe_neutral": sg["sharpe_neutral"],
+                "sharpe_neutral": rg["sharpe_neutral"],
                 "avg_cost": float(_win(cost_s, start).mean()),
                 "net_mean": sn["mean_monthly"], "net_tstat": sn["tstat"],
                 "net_sharpe": sn["sharpe"], "net_alpha": rn["alpha"],
                 "net_alpha_tstat": rn["alpha_tstat"],
-                "net_sharpe_neutral": sn["sharpe_neutral"],
+                "net_sharpe_neutral": rn["sharpe_neutral"],
                 "pct_in_market": float(_win(active_s, start).mean()),
                 "n_months": int(sg["n_months"]),
             })
@@ -216,36 +225,36 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
 # Consolidated performance table (project house style, one row per factor x book)
 # --------------------------------------------------------------------------- #
 _PERF_TITLE = (
-    "Factor-spread timing: always-on vs spread-timed long-short performance\n"
+    "Factor-spread timing: spread-timed long-short performance\n"
     "(hold the Q5-Q1 book only when its top-minus-bottom factor-value spread exceeds "
     f"its trailing {LOOKBACK}m average;  α = industry-neutral monthly return,  "
     "Sharpe net cost = after-cost Sharpe)")
 
 
 def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[dict]:
-    """The always-on and spread-timed :func:`regression.render_alpha_table` rows for
-    one factor.  The gross (cost-free) L/S Sharpe and β-neutral Sharpe come from the
-    always-on / timed book unchanged; the combined "Sharpe net cost" column carries
-    this experiment's after-cost (net) raw and β-neutral Sharpe.  Alpha is the gross
-    book's, matching every other experiment's table (cost is shown via the
-    net-of-cost Sharpe and the average-cost column, not netted from α)."""
-    rows = []
-    for book, family in (("always_on", "always-on"), ("timed", "spread-timed")):
-        sub = comparison[comparison["book"] == book].set_index("window")
-        full, dec = sub.loc["full"], sub.loc["2016+"]
-        rows.append({
-            "factor": factor, "family": family, "direction": direction,
-            "alpha": full["gross_alpha"], "alpha_tstat": full["gross_alpha_tstat"],
-            "sharpe": full["gross_sharpe"], "sharpe_neutral": full["sharpe_neutral"],
-            "sharpe_cost": full["net_sharpe"],
-            "sharpe_cost_neutral": full["net_sharpe_neutral"],
-            "avg_cost_pp": full["avg_cost"] * 100.0, "n": int(full["n_months"]),
-            "alpha_2016": dec["gross_alpha"], "alpha_tstat_2016": dec["gross_alpha_tstat"],
-            "sharpe_2016": dec["gross_sharpe"], "sharpe_neutral_2016": dec["sharpe_neutral"],
-            "sharpe_cost_2016": dec["net_sharpe"],
-            "sharpe_cost_neutral_2016": dec["net_sharpe_neutral"],
-        })
-    return rows
+    """The spread-timed :func:`regression.render_alpha_table` row for one factor.  The
+    gross (cost-free) L/S Sharpe and β-neutral Sharpe come from the timed book
+    unchanged; the combined "Sharpe net cost" column carries this experiment's
+    after-cost (net) raw and β-neutral Sharpe.  Alpha is the gross book's, matching
+    every other experiment's table (cost is shown via the net-of-cost Sharpe and the
+    average-cost column, not netted from α).  ``pct_activation`` (the full-sample
+    fraction of months the spread gate holds the book) drives the "% activation"
+    column the table renders right after "Sharpe net cost"."""
+    sub = comparison[comparison["book"] == "timed"].set_index("window")
+    full, dec = sub.loc["full"], sub.loc["2016+"]
+    return [{
+        "factor": factor, "family": "spread-timed", "direction": direction,
+        "alpha": full["gross_alpha"], "alpha_tstat": full["gross_alpha_tstat"],
+        "sharpe": full["gross_sharpe"], "sharpe_neutral": full["sharpe_neutral"],
+        "sharpe_cost": full["net_sharpe"],
+        "sharpe_cost_neutral": full["net_sharpe_neutral"],
+        "pct_activation": full["pct_in_market"],
+        "avg_cost_pp": full["avg_cost"] * 100.0, "n": int(full["n_months"]),
+        "alpha_2016": dec["gross_alpha"], "alpha_tstat_2016": dec["gross_alpha_tstat"],
+        "sharpe_2016": dec["gross_sharpe"], "sharpe_neutral_2016": dec["sharpe_neutral"],
+        "sharpe_cost_2016": dec["net_sharpe"],
+        "sharpe_cost_neutral_2016": dec["net_sharpe_neutral"],
+    }]
 
 
 # --------------------------------------------------------------------------- #
@@ -256,10 +265,10 @@ def _pick(comparison: pd.DataFrame, book: str, window: str, col: str) -> float:
     return float(m[col].iloc[0])
 
 
-def run(csv_path: Path = CANDIDATES_CSV, out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
+def run(out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
     """Test every ranked factor under the spread-timing rule and write the single
     consolidated performance table."""
-    candidates = FM.load_top_factors(csv_path, n=None)   # every ranked factor, not just the top-5
+    candidates = FM.ranked_factors(None)                 # every ranked factor, not just the top-5
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("=== Experiment 4: factor-spread timing of every ranked factor ===")
@@ -295,13 +304,12 @@ def run(csv_path: Path = CANDIDATES_CSV, out_dir: Path = OUTPUT_DIR) -> pd.DataF
                 r.factor, r.subexperiment, r.direction, panel, cost_panel, industry)
             perf_by_factor[r.factor] = _perf_rows(comparison, r.factor, r.direction)
 
-            for book in ("always_on", "timed"):
-                print(f"  {r.factor:<30} {book:<11} "
-                      f"{_pick(comparison, book, 'full', 'net_alpha'):+.4%} "
-                      f"{_pick(comparison, book, 'full', 'net_alpha_tstat'):+7.2f}  "
-                      f"{_pick(comparison, book, 'full', 'avg_cost') * 100:6.4f}  "
-                      f"{_pick(comparison, book, 'full', 'pct_in_market'):4.0%}  "
-                      f"{int(_pick(comparison, book, 'full', 'n_months')):>4}")
+            print(f"  {r.factor:<30} {'timed':<11} "
+                  f"{_pick(comparison, 'timed', 'full', 'net_alpha'):+.4%} "
+                  f"{_pick(comparison, 'timed', 'full', 'net_alpha_tstat'):+7.2f}  "
+                  f"{_pick(comparison, 'timed', 'full', 'avg_cost') * 100:6.4f}  "
+                  f"{_pick(comparison, 'timed', 'full', 'pct_in_market'):4.0%}  "
+                  f"{int(_pick(comparison, 'timed', 'full', 'n_months')):>4}")
 
     # One consolidated performance table for the whole experiment (all factors x
     # both books), in the same house style as every other experiment's alpha table.

@@ -686,43 +686,70 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
     ``title`` overrides the figure's suptitle; when ``None`` (the default) the
     standard quintile-book caption is used, so existing callers are unchanged.
     A book built on a different bucketing (e.g. tertiles) passes its own title.
+
+    An optional **% activation** column (the fraction of months a timing overlay
+    holds the book, ``pct_activation`` field) is inserted immediately after the
+    full-sample "Sharpe net cost" column, but *only* when at least one row supplies
+    it -- so tables without a timing gate render exactly as before.
     """
+    show_activation = ("pct_activation" in rows.columns
+                       and rows["pct_activation"].notna().any())
+
     headers = ["Factor", "Family", "L/S\ndirection",
                "Alpha (monthly)\n& t-stat",
                "Sharpe\n(ann.)", "β-neutral\nSharpe",
-               "Sharpe net cost\n(raw / β-neut)", "Avg cost\n(monthly)", "n",
-               "Alpha (2016+)\n& t-stat",
-               "Sharpe\n(2016+)", "β-neutral\nSh (2016+)",
-               "Sharpe net cost\n(2016+, raw/β-n)"]
+               "Sharpe net cost\n(raw / β-neut)"]
+    if show_activation:
+        headers.append("% activation\n(months held)")
+    headers += ["Avg cost\n(monthly)", "n",
+                "Alpha (2016+)\n& t-stat",
+                "Sharpe\n(2016+)", "β-neutral\nSh (2016+)",
+                "Sharpe net cost\n(2016+, raw/β-n)"]
 
     cell_text, cell_colors = [], []
     for _, r in rows.iterrows():
-        cell_text.append([
+        row_text = [
             r["factor"], r["family"], r["direction"],
             _fmt_stat_cell(r["alpha"], r["alpha_tstat"], True),
             _fmt_num(r["sharpe"]), _fmt_num(r["sharpe_neutral"]),
             _fmt_net_sharpe_cell(r.get("sharpe_cost", np.nan),
                                  r.get("sharpe_cost_neutral", np.nan)),
+        ]
+        row_colors = [
+            "white", "white", "white",
+            _tstat_color(r["alpha_tstat"]),
+            "white", "white", "white",
+        ]
+        if show_activation:
+            act = r.get("pct_activation", np.nan)
+            row_text.append("—" if pd.isna(act) else f"{act:.0%}")
+            row_colors.append("#e8f0e8")
+        row_text += [
             f"{-r['avg_cost_pp'] / 100:+.4%}", f"{int(r['n'])}",
             _fmt_stat_cell(r["alpha_2016"], r["alpha_tstat_2016"], True),
             _fmt_num(r["sharpe_2016"]), _fmt_num(r["sharpe_neutral_2016"]),
             _fmt_net_sharpe_cell(r.get("sharpe_cost_2016", np.nan),
                                  r.get("sharpe_cost_neutral_2016", np.nan)),
-        ])
-        cell_colors.append([
-            "white", "white", "white",
-            _tstat_color(r["alpha_tstat"]),
-            "white", "white", "white", "#fde7d6", "white",
+        ]
+        row_colors += [
+            "#fde7d6", "white",
             _tstat_color(r["alpha_tstat_2016"]), "white", "white", "white",
-        ])
+        ]
+        cell_text.append(row_text)
+        cell_colors.append(row_colors)
 
     n = len(rows)
-    fig, ax = plt.subplots(figsize=(16.0, 0.62 * (n + 1) + 1.4))
+    fig, ax = plt.subplots(figsize=(16.0 + (1.2 if show_activation else 0.0),
+                                    0.62 * (n + 1) + 1.4))
     ax.axis("off")
 
+    col_widths = [0.10, 0.12, 0.055, 0.09, 0.05, 0.058, 0.085]
+    if show_activation:
+        col_widths.append(0.06)
+    col_widths += [0.06, 0.03, 0.09, 0.05, 0.058, 0.085]
+
     tbl = ax.table(cellText=cell_text, colLabels=headers, cellColours=cell_colors,
-                   colWidths=[0.10, 0.12, 0.055, 0.09, 0.05, 0.058,
-                              0.085, 0.06, 0.03, 0.09, 0.05, 0.058, 0.085],
+                   colWidths=col_widths,
                    cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(9)
@@ -736,6 +763,9 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
     default_title = ("Long-short quintile strategy regressed on the industry return\n"
                      "(ls_t = α + β·industry_t + ε;  α = industry-neutral monthly return)")
     fig.suptitle(default_title if title is None else title, fontsize=11, y=0.99)
+    activation_note = ("  % activation = share of the common-sample months the timing "
+                       "overlay is in-market (holds the book; the rest are cash)."
+                       if show_activation else "")
     fig.text(0.5, 0.015, "The alpha cell stacks the estimate over its t-stat.  "
              "Shaded alpha t-stats: |t| ≥ 1.65 (10%), darker |t| ≥ 2.0 (5%).  "
              "Sharpe = annualised Sharpe of the L/S book.  β-neutral Sharpe hedges "
@@ -743,7 +773,7 @@ def render_alpha_table(rows: pd.DataFrame, path: Path,
              "expanding, look-ahead-free window).  Sharpe net cost = annualised Sharpe of "
              "the book's return net of turnover cost (top = raw L/S, bottom βn = "
              "β-neutralised).  Avg cost = mean monthly turnover cost (one-way, traded "
-             "weight only).  2016+ columns re-estimate on the past decade only.",
+             "weight only).  2016+ columns re-estimate on the past decade only." + activation_note,
              ha="center", fontsize=8, color="#555555")
     fig.subplots_adjust(left=0.02, right=0.98, top=0.80, bottom=0.10)
     fig.savefig(path, dpi=150)
