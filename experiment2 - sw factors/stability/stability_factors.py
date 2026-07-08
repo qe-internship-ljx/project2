@@ -36,17 +36,19 @@ basis.
     --------------------------------  ----------------------------------------------------------------  ----------  -----------
     revenue_stability                 - trailing 36m std of YoY revenue growth                          long high   revenue durability (2nd moment)
     cashflow_stability                - trailing 12m coeff. of variation of OCF margin                  long high   cash-generation consistency
-    return_stability                  - trailing 12m coeff. of variation of monthly return              long high   return consistency (low-vol)
+    return_stability                  - trailing 12m std of monthly return                             long high   return consistency (low-vol)
     gross_profitability_stability     - trailing 12m coeff. of variation of GP/assets                   long high   gross-profitability consistency
 
-``cashflow_stability`` / ``return_stability`` / ``gross_profitability_stability``
-are *level*-consistency signals and use a **trailing 12-month** window: a short
-window makes each score a *current* read on consistency and maximises scorable
-stock-months at the front of each name's history.  ``revenue_stability`` is a
-*growth*-consistency signal (the dispersion of the top-line growth *rate*, not of
-a level), so it uses a longer **trailing 36-month** window over the YoY growth
-series -- a plain standard deviation rather than a coefficient of variation,
-because YoY growth is already scale-free.
+``cashflow_stability`` / ``gross_profitability_stability`` are *level*-consistency
+signals and use a **trailing 12-month** window: a short window makes each score a
+*current* read on consistency and maximises scorable stock-months at the front of
+each name's history.  ``return_stability`` shares that 12-month window but is the
+dispersion of the (already unitless, near-zero-mean) return stream, so it uses a
+plain standard deviation rather than a coefficient of variation -- no mean scaling.
+``revenue_stability`` is a *growth*-consistency signal (the dispersion of the
+top-line growth *rate*, not of a level), so it likewise uses a plain standard
+deviation -- because YoY growth is already scale-free -- but over a longer
+**trailing 36-month** window on the YoY growth series.
 
 * ``revenue_stability`` is the negative trailing-36m standard deviation of YoY
   revenue growth, per stock.  High (near 0) => a smooth, predictable, recurring
@@ -66,14 +68,15 @@ because YoY growth is already scale-free.
   software stock-months (less reliably so than gross margin but far more than
   EPS), so the robust |mean| denominator and near-zero-mean guard do real work
   here.  Currency-neutral by construction (a ratio of same-currency line items).
-* ``return_stability`` is the negative trailing-12m coefficient of variation of
-  the monthly total return.  A high score (return std small relative to its mean)
-  marks a smooth, low-volatility return stream -- the same direction as the
-  low-volatility / high-Sharpe anomaly; a very negative score marks an erratic,
-  lottery-like stream.  Built straight off prices, so it needs no fundamentals
-  and is the most data-complete factor here; monthly returns swing sign with a
-  small trailing mean, so the sign-robust |mean| denominator and near-zero-mean
-  guard do the most work for this factor.
+* ``return_stability`` is the negative trailing-12m standard deviation of the
+  monthly total return.  A high score (small return std) marks a smooth,
+  low-volatility return stream -- the same direction as the low-volatility /
+  high-Sharpe anomaly; a very negative score marks an erratic, lottery-like
+  stream.  Built straight off prices, so it needs no fundamentals and is the most
+  data-complete factor here.  Returns are already unitless and centred near zero,
+  so a plain std is the natural volatility measure; scaling by the sign-flipping,
+  near-zero trailing mean (a CoV) would be explosive and carry no signal, so it is
+  deliberately avoided here.
 * ``gross_profitability_stability`` is the negative trailing-12m coefficient of
   variation of gross profitability (``gross_income_ltm / assets``; Novy-Marx
   2013).  It watches the consistency of gross profit *per dollar of
@@ -83,9 +86,10 @@ because YoY growth is already scale-free.
 
 Sign instability (important)
 ----------------------------
-Some inputs here cross zero within a trailing window -- monthly returns swing
-sign every month and the OCF margin can turn negative -- so a raw std/mean
-coefficient of variation is sign-unstable and explosive.  We
+Some CoV inputs here cross zero within a trailing window -- the OCF margin can
+turn negative -- so a raw std/mean coefficient of variation is sign-unstable and
+explosive.  (``return_stability`` sidesteps this entirely by using a plain std,
+not a CoV; see its note above.)  For the CoV factors we
 therefore (a) use the **absolute** mean in the denominator (``std / |mean|`` --
 the standard robust CoV for series that may be negative) and (b) treat the score
 as **undefined when the window mean is small relative to the window's average
@@ -317,11 +321,9 @@ def _ocf_margin_series(p: pd.DataFrame) -> pd.Series:
 def _return_series(p: pd.DataFrame) -> pd.Series:
     """Monthly total return (already on the panel as ``mret``).
 
-    Returns are unitless and currency-neutral, so they feed the coefficient of
-    variation directly.  The series swings sign month to month and its trailing
-    mean is small relative to its dispersion, so the sign-robust |mean|
-    denominator and the near-zero-mean guard in :func:`_neg_coeff_of_variation`
-    do real work here."""
+    Returns are unitless and currency-neutral; :func:`_f_return_stability` takes a
+    plain trailing std of this series (no mean scaling), so it swings sign month to
+    month without any of the CoV sign-robustness machinery."""
     return p["mret"].astype(float)
 
 
@@ -403,15 +405,19 @@ def _f_cashflow_stability(p: pd.DataFrame) -> pd.Series:
 
 def _f_return_stability(p: pd.DataFrame) -> pd.Series:
     """
-    Return stability: the negative trailing-12m robust coefficient of variation
-    of the monthly total return.  A high score (return std small relative to its
-    mean) marks a smooth, low-volatility return stream -- the same direction as
-    the low-volatility / high-Sharpe anomaly (steady compounders outperform on a
-    risk-adjusted basis); a very negative score marks an erratic, lottery-like
-    return stream.  Built straight off prices, so unlike the other members it
-    needs no fundamentals and is the most data-complete factor here.
+    Return stability: the NEGATIVE trailing-12m standard deviation of the monthly
+    total return.  A high score (small return std) marks a smooth, low-volatility
+    return stream -- the same direction as the low-volatility / high-Sharpe anomaly
+    (steady compounders outperform on a risk-adjusted basis); a very negative score
+    marks an erratic, lottery-like return stream.  Built straight off prices, so
+    unlike the other members it needs no fundamentals and is the most data-complete
+    factor here.  Returns are already unitless and centred near zero, so a plain std
+    is the natural volatility measure -- no mean scaling (which the sign-flipping,
+    near-zero-mean return series makes unstable) and hence no CoV machinery here.
     """
-    return _neg_coeff_of_variation(p, _return_series(p))
+    std = (_return_series(p).groupby(p["stock_id"], observed=True)
+           .transform(lambda s: s.rolling(STAB_WINDOW, min_periods=STAB_MIN_PERIODS).std()))
+    return -std
 
 
 def _f_gross_profitability_stability(p: pd.DataFrame) -> pd.Series:

@@ -29,16 +29,24 @@ The candidate factors are exactly Experiment 2's FULL quarterly-repositioned
 cross-experiment ranking (``quarter_position.ranked_factors`` with ``n=None`` --
 every ranked factor, not just the top five), so re-running Experiment 2 re-points
 this module automatically.  The base book each overlay gates is the factor's
-**quarterly-repositioned** Q5-Q1 book (the project-wide convention); the factor-value
-spread signal and the in/out gate remain monthly.
+**quarterly-repositioned** top-minus-bottom book (the project-wide convention); the
+factor-value spread signal and the in/out gate remain monthly.
+
+The whole rule is run at **two bucket granularities** -- the headline quintile (Q5-Q1)
+book and, identically, the tertile (Q3-Q1) book -- by threading a single bucket count
+``n`` through the spread signal, the traded book and the table (``n=5`` quintiles,
+``n=3`` tertiles).  Each granularity reads its own ``n``-bucket ranking as the candidate
+set (the ``quintile`` / ``tertile`` hand-off), matching ``composite.py``'s convention,
+and writes its own table.
 
 Engine reuse (the project's dependency-injection convention)
 ------------------------------------------------------------
 Nothing generic is re-implemented:
 
-* each factor's signed quarterly Q5-Q1 long/short return is the shared
-  ``factor_momentum.signed_spread`` (``quarter_position.quarter_held_spread``,
-  oriented by the factor's bullish ``direction``) -- no return is recomputed;
+* each factor's signed quarterly top-minus-bottom long/short return is the shared
+  ``quarter_position.quarter_held_spread`` (the primitive behind
+  ``factor_momentum.signed_spread``), oriented by the factor's bullish ``direction``
+  and formed on ``n`` buckets -- no return is recomputed;
 * every performance statistic (industry-neutral alpha + t, industry beta,
   beta-neutral Sharpe) comes from ``composite.book_stats`` / ``industry_return``,
   so "alpha" is defined identically to every other long/short book in the project;
@@ -54,17 +62,17 @@ Run standalone::
 
     python spread_timing.py
 
-The single output is one consolidated performance table under
-``experiment4 - timing/output/``:
+The outputs are two consolidated performance tables under
+``experiment4 - timing/output/`` -- one per bucket granularity:
 
-    spread_timing_performance.png  ONE consolidated performance table (project house
-                                   style, one row per factor -- the spread-timed book):
-                                   gross (cost-free)
-                                   L/S & beta-neutral Sharpe, the combined after-cost
-                                   ("Sharpe net cost") Sharpe, the % activation (share
-                                   of months the spread gate holds the book),
-                                   industry-neutral alpha & beta, average cost --
-                                   full sample and 2016+
+    spread_timing_quintile_performance.png          headline QUINTILE (Q5-Q1) book
+    spread_timing_tertile_performance.png  the same rule on the TERTILE (Q3-Q1) book
+
+Each is one consolidated performance table (project house style, one row per factor --
+the spread-timed book): gross (cost-free) L/S & beta-neutral Sharpe, the combined
+after-cost ("Sharpe net cost") Sharpe, the % activation (share of months the spread
+gate holds the book), industry-neutral alpha & beta, average cost -- full sample and
+2016+.
 """
 
 from __future__ import annotations
@@ -102,26 +110,27 @@ UNIVERSE = F.SOFTWARE_SERVICES                # every candidate factor lives on 
 # --------------------------------------------------------------------------- #
 # Step 1 -- the factor-value spread (the timing characteristic)
 # --------------------------------------------------------------------------- #
-def value_spread(panel: pd.DataFrame, factor: str) -> pd.Series:
+def value_spread(panel: pd.DataFrame, factor: str, n: int = N_QUINTILES) -> pd.Series:
     """
     Monthly factor-value spread = mean raw factor value of the top z-score
-    quintile minus that of the bottom quintile, indexed by formation month.
+    bucket minus that of the bottom bucket of an ``n``-bucket sort, indexed by
+    formation month (``n=5`` quintiles, ``n=3`` tertiles).
 
-    The buckets are the *same* equal-count z-score quintiles the book trades
+    The buckets are the *same* equal-count z-score buckets the book trades
     (via :func:`factors.prepare_slice`), and the raw values are winsorised within
     each month (the engine's own cross-sectional winsorisation) so the tail means
     are not dominated by a single outlier.  Measured on the raw value, not the
     z-score: z-scores are standardised to ~unit dispersion every month, so their
-    Q5-Q1 gap is near-constant and carries no timing information, whereas the raw
-    characteristic spread genuinely widens and narrows over time.
+    top-minus-bottom gap is near-constant and carries no timing information, whereas
+    the raw characteristic spread genuinely widens and narrows over time.
     """
-    sub = F.prepare_slice(panel, factor, N_QUINTILES)        # date, stock_id, zscore, next_return, quintile
+    sub = F.prepare_slice(panel, factor, n)                  # date, stock_id, zscore, next_return, quintile
     vals = (panel.loc[panel["factor"] == factor, ["date", "stock_id", "value"]]
                  .dropna(subset=["value"]))
     sub = sub.merge(vals, on=["date", "stock_id"], how="inner")
     sub["value"] = F.winsorize_cross_section(sub["value"], sub["date"])
     means = sub.pivot_table(index="date", columns="quintile", values="value", aggfunc="mean")
-    return (means[float(N_QUINTILES)] - means[1.0]).rename("value_spread").sort_index()
+    return (means[float(n)] - means[1.0]).rename("value_spread").sort_index()
 
 
 def timing_flags(spread: pd.Series, lookback: int = LOOKBACK
@@ -151,10 +160,11 @@ WINDOWS: list[tuple[str, pd.Timestamp | None]] = [("full", None), ("2016+", DECA
 
 def evaluate_factor(factor: str, subexperiment: str, direction: str,
                     panel: pd.DataFrame, cost_panel: pd.DataFrame,
-                    industry: pd.Series) -> pd.DataFrame:
+                    industry: pd.Series, n: int = N_QUINTILES) -> pd.DataFrame:
     """
     Build the spread-timed book for one factor and tabulate its gross and after-cost
-    performance over the full sample and 2016+.
+    performance over the full sample and 2016+.  ``n`` sets the bucket count of both
+    the traded book and the timing spread (``n=5`` quintiles, ``n=3`` tertiles).
 
     Returns the tidy ``comparison`` stats table (one row per window): the gross
     (cost-free) mean / t / Sharpe / industry-neutral alpha & beta, and the
@@ -167,8 +177,13 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
     (:func:`cost.active_month_cost`), so a book entered and exited within a single
     month is discounted by the full round-trip (double) cost on that month.
     """
-    gross = FM.signed_spread(panel, factor, direction)                # bullish quarterly Q5-Q1 book
-    spread = value_spread(panel, factor)
+    # Orient long/short from the ranking's direction label, bucket-count free: bullish
+    # top-minus-bottom labels lead with the high bucket (``Q5-Q1``/``T3-T1``/``H2-H1``),
+    # the bearish reverse leads with ``1`` (``Q1-Q5``/``T1-T3``).  (A bare ``== "Q5-Q1"``
+    # test would silently flip every tertile/half book, whose label is ``T3-T1`` etc.)
+    sign = -1 if str(direction).strip()[1:].startswith("1-") else 1
+    gross = C.QP.quarter_held_spread(panel, factor, sign, n).rename(factor)  # bullish quarterly top-bottom book
+    spread = value_spread(panel, factor, n)
     trailing, _ = timing_flags(spread)
 
     # Common sample: months with both a traded return and a defined timing signal.
@@ -182,7 +197,7 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
     # Turnover cost of the timing overlay on the factor's quarterly-held legs (exit
     # on the out-of-market months, re-enter): the ``active`` mask charges the full
     # liquidation on exit and re-establishment on entry over the quarterly membership.
-    legs = C.QP.quarter_held_legs(panel, factor, N_QUINTILES)
+    legs = C.QP.quarter_held_legs(panel, factor, n)
     leg_dates = pd.Index(sorted(legs["date"].unique()), name="date")
     cost_timed = (COST.turnover_cost(legs, cost_panel, leg_dates, active=flag)
                       .reindex(eval_index).fillna(0.0))
@@ -232,11 +247,14 @@ def evaluate_factor(factor: str, subexperiment: str, direction: str,
 # --------------------------------------------------------------------------- #
 # Consolidated performance table (project house style, one row per factor x book)
 # --------------------------------------------------------------------------- #
-_PERF_TITLE = (
-    "Factor-spread timing: spread-timed long-short performance\n"
-    "(hold the Q5-Q1 book only when its top-minus-bottom factor-value spread exceeds "
-    f"its trailing {LOOKBACK}m average;  α = industry-neutral monthly return,  "
-    "Sharpe net cost = after-cost Sharpe)")
+def _perf_title(n: int) -> str:
+    """House-style table title for the ``n``-bucket sort (``n=5`` quintiles, ``n=3``
+    tertiles): only the sort word and the top-minus-bottom spread column change."""
+    return (
+        f"Factor-spread timing: spread-timed {C.sort_word(n)} long-short performance\n"
+        f"(hold the Q{n}-Q1 book only when its top-minus-bottom factor-value spread exceeds "
+        f"its trailing {LOOKBACK}m average;  α = industry-neutral monthly return,  "
+        "Sharpe net cost = after-cost Sharpe)")
 
 
 def _perf_rows(comparison: pd.DataFrame, factor: str, direction: str) -> list[dict]:
@@ -273,16 +291,20 @@ def _pick(comparison: pd.DataFrame, book: str, window: str, col: str) -> float:
     return float(m[col].iloc[0])
 
 
-def run(out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
+def run(out_dir: Path = OUTPUT_DIR, n: int = N_QUINTILES) -> pd.DataFrame:
     """Test every ranked factor under the spread-timing rule and write the single
-    consolidated performance table."""
-    candidates = FM.ranked_factors(None)                 # every ranked factor, not just the top-5
+    consolidated performance table.  ``n`` sets the bucket count of both the traded
+    book and the timing spread (``n=5`` quintiles, ``n=3`` tertiles); the ``n``-bucket
+    ranking is read as the candidate set, so the tertile run tests the tertile-ranked
+    factors and writes ``spread_timing_tertile_performance.png``."""
+    word = C.sort_word(n)
+    candidates = FM.ranked_factors(None, word)           # every ranked factor, not just the top-5
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=== Experiment 4: factor-spread timing of every ranked factor ===")
+    print(f"=== Experiment 4: factor-spread timing ({word}) of every ranked factor ===")
     print(f"Candidates ({len(candidates)}): " + ", ".join(
         f"{r.factor} [{r.subexperiment}]" for r in candidates.itertuples()))
-    print(f"Rule: hold the Q5-Q1 book in month t+1 only if the factor-value spread "
+    print(f"Rule: hold the Q{n}-Q1 book in month t+1 only if the factor-value spread "
           f"at t exceeds its trailing {LOOKBACK}m average (after-cost).")
 
     # Built once and shared: the within-industry "market" return and the cost panel
@@ -309,7 +331,7 @@ def run(out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
 
         for r in grp.itertuples():
             comparison = evaluate_factor(
-                r.factor, r.subexperiment, r.direction, panel, cost_panel, industry)
+                r.factor, r.subexperiment, r.direction, panel, cost_panel, industry, n)
             perf_by_factor[r.factor] = _perf_rows(comparison, r.factor, r.direction)
 
             print(f"  {r.factor:<30} {'timed':<11} "
@@ -325,15 +347,18 @@ def run(out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
     # the candidates panel-by-panel, not by rank).
     perf = pd.DataFrame([row for factor in candidates["factor"]
                          for row in perf_by_factor[factor]])
-    C.R.render_alpha_table(perf, out_dir / "spread_timing_performance.png", title=_PERF_TITLE)
+    # Headline quintile book keeps the bare filename; other sorts (tertile) are suffixed.
+    suffix = f"_{word}"
+    out_png = out_dir / f"spread_timing{suffix}_performance.png"
+    C.R.render_alpha_table(perf, out_png, title=_perf_title(n))
 
-    print(f"\nSaved consolidated performance table -> "
-          f"{out_dir / 'spread_timing_performance.png'}")
+    print(f"\nSaved consolidated performance table -> {out_png}")
     return perf
 
 
 def main() -> None:
-    run()
+    run(n=N_QUINTILES)                                   # headline quintile book
+    run(n=C.N_TERTILES)                                  # tertile book
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ never netted from the gross alpha.
 
 Outputs (``output/portfolio_overlay/``)
 ---------------------------------------
-    performance.png     the joint book's mean / t / Sharpe / industry-neutral
+    quintile_performance.png     the joint book's mean / t / Sharpe / industry-neutral
                         alpha / net-of-cost Sharpe / largest single-name ownership
                         for a $100M book / avg cost, full sample and 2016+
 
@@ -162,7 +162,7 @@ def run(out_dir: Path = OUTPUT_DIR) -> dict:
         "alpha from regressing the book on the market-cap-weighted industry return; "
         "cost charged on the cross-book netted weights.   "
         "Shading: |t| >= 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png",
+        out_dir / "quintile_performance.png",
         extra_metrics=[C.ownership_metric()])
 
     # --- Console summary (ASCII only -- Windows cp1252 stdout) --------------- #

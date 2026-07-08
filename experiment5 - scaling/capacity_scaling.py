@@ -33,6 +33,22 @@ alpha table reads directly against the standard (equal-weighted) quintile book.
 The output is one alpha table per weighting scheme, in the *same* format as
 ``experiment2 - sw factors/factor_ranking/quarter_quintile.png``.
 
+Ownership threshold (0.5% single-name cap)
+------------------------------------------
+The **raw (equal-weighted) quintile book** -- not the capacity-weighted ones above --
+is additionally re-evaluated with a **0.5% point-in-time single-name ownership
+ceiling**: starting from equal within-leg weights, any name whose position (per-leg
+capital times its within-leg weight) would own more than 0.5% of its own market cap
+is pushed down to the 0.5% weight, and the freed weight is redistributed
+proportionally across the still-uncapped names, water-filled until no name breaches
+the cap (:func:`_cap_ownership`, driven by ``scaled_legs(_equal_weight, ...,
+ownership_cap=...)``).  Everything else -- the buckets, orientation, benchmark and
+every downstream statistic -- is the standard equal-weighted book's, so the table
+reads directly against it.  Run for both the QUINTILE and TERTILE sort; output: two
+alpha tables under ``output/ownership_threshold/`` --
+``quintile_long_short_market_alpha.png`` (quintile) and
+``tertile_long_short_market_alpha.png`` (tertile).
+
 Bivariate extension (Experiment 3's double sort)
 ------------------------------------------------
 The single-factor books above sqrt-cap-weight the top / bottom **quintile** legs.
@@ -154,6 +170,11 @@ _bivariate = _load_by_path("exp3_bivariate_gate", _EXP3_DIR / "bivariate_gate.py
 N_QUINTILES = 5
 DECADE_START = regression.DECADE_START     # 2016+ ("past decade") window, shared
 
+# Per-leg capital of the dollar-neutral book (Experiment 3's $100M total / 2), used to
+# turn within-leg weights into point-in-time ownership shares for the 0.5% cap below.
+_C_LEG_CAPITAL = _bivariate.C.LEG_CAPITAL
+OWNERSHIP_CAP = 0.005                      # 0.5% single-name ownership ceiling
+
 
 # --------------------------------------------------------------------------- #
 # Within-leg weighting schemes.  Each is the whole difference from the
@@ -163,6 +184,13 @@ DECADE_START = regression.DECADE_START     # 2016+ ("past decade") window, share
 # pure cap weighting.  ``run`` iterates over :data:`WEIGHTINGS`, rendering one
 # alpha table per scheme.
 # --------------------------------------------------------------------------- #
+def _equal_weight(mcap_usd: pd.Series) -> pd.Series:
+    """Unnormalised equal within-leg weight -- the RAW quintile book (every name in
+    the top / bottom bucket weighted the same), independent of market cap.  Used as
+    the base book for the ownership-threshold variant."""
+    return pd.Series(1.0, index=mcap_usd.index)
+
+
 def _sqrt_cap_weight(mcap_usd: pd.Series) -> pd.Series:
     """Unnormalised within-leg weight = sqrt(USD market cap) -- a mild tilt toward
     the larger, more liquid names in each leg (a capacity / liquidity tilt that
@@ -183,7 +211,7 @@ WEIGHTINGS = [
         "label": "sqrt",
         "raw_weight": _sqrt_cap_weight,
         "out_png": _THIS_DIR / "output" / "capacity_scaling" / "univariate_scaled"
-                   / "long_short_market_alpha.png",
+                   / "sqrt_quintile_long_short_market_alpha.png",
         "title": (
             "Long-short QUINTILE strategy (repositioned QUARTERLY) with "
             "sqrt(market-cap)-weighted legs, regressed on the industry return\n"
@@ -195,7 +223,7 @@ WEIGHTINGS = [
         "label": "log6",
         "raw_weight": _log6_cap_weight,
         "out_png": _THIS_DIR / "output" / "capacity_scaling" / "univariate_scaled"
-                   / "log6_long_short_market_alpha.png",
+                   / "log6_quintile_long_short_market_alpha.png",
         "title": (
             "Long-short QUINTILE strategy (repositioned QUARTERLY) with "
             "log(market-cap)**6-weighted legs, regressed on the industry return\n"
@@ -209,7 +237,34 @@ WEIGHTINGS = [
 # --------------------------------------------------------------------------- #
 # Capacity-scaled (market-cap-weighted) long/short book
 # --------------------------------------------------------------------------- #
-def scaled_legs(panel: pd.DataFrame, factor: str, raw_weight, n: int = N_QUINTILES) -> pd.DataFrame:
+def _cap_ownership(legs: pd.DataFrame, cap: float, leg_capital: float) -> pd.Series:
+    """Water-fill within-leg weights ``w`` so no name's point-in-time ownership
+    share (``leg_capital * w / mcap``) exceeds ``cap``: any name over the cap is
+    pinned at its ownership-cap weight (``cap * mcap / leg_capital``) and the
+    freed weight is redistributed proportionally to the still-uncapped names,
+    iterating within each ``(date, leg)`` until no name breaches the cap (or every
+    name is pinned).  Returns the capped ``w`` (still summing to one per leg where
+    feasible), index-aligned to ``legs``."""
+    w = legs["w"].copy()
+    ceiling = cap * legs["mcap"] / leg_capital          # ownership-cap weight per name
+    key = [legs["date"], legs["leg"]]
+    over = w > ceiling
+    while over.any():
+        w = w.mask(over, ceiling)
+        pinned = over | (w >= ceiling)                  # names already at their ceiling
+        free_w = w.mask(pinned, 0.0)
+        # Redistribute the weight freed by pinning across the unpinned names, pro-rata.
+        headroom = (1.0 - w.where(pinned, 0.0).groupby(key).transform("sum"))
+        free_sum = free_w.groupby(key).transform("sum")
+        scale = (headroom / free_sum).where(free_sum > 0, 1.0)
+        w = w.where(pinned, free_w * scale)
+        over = w > ceiling + 1e-15
+    return w
+
+
+def scaled_legs(panel: pd.DataFrame, factor: str, raw_weight, n: int = N_QUINTILES,
+                ownership_cap: float | None = None,
+                leg_capital: float = _C_LEG_CAPITAL) -> pd.DataFrame:
     """
     Tidy ``date, stock_id, leg, w, next_return`` for the top and bottom buckets of
     ``factor``, with each name's within-leg weight ``w`` proportional to
@@ -224,6 +279,11 @@ def scaled_legs(panel: pd.DataFrame, factor: str, raw_weight, n: int = N_QUINTIL
     weight is not finite and positive cannot be sized and drop out (the panel is
     market-cap screened, so this is rare) -- the surviving names' weights are
     renormalised to sum to one.
+
+    When ``ownership_cap`` is given (e.g. 0.005 = 0.5%), the normalised weights are
+    additionally water-filled by :func:`_cap_ownership` so no name's point-in-time
+    ownership share (``leg_capital * w / mcap``) exceeds it -- any breach is pushed
+    down to the cap and the freed weight absorbed by the rest of the leg.
     """
     held = _qp.quarter_held_membership(F.prepare_slice(panel, factor, n))
     caps = (panel.loc[panel["factor"] == factor, ["date", "stock_id", "weight"]]
@@ -236,6 +296,9 @@ def scaled_legs(panel: pd.DataFrame, factor: str, raw_weight, n: int = N_QUINTIL
     legs = legs.loc[np.isfinite(legs["raw_w"]) & (legs["raw_w"] > 0)].copy()
     denom = legs.groupby(["date", "leg"], observed=True)["raw_w"].transform("sum")
     legs["w"] = legs["raw_w"] / denom
+    if ownership_cap is not None:
+        legs = legs.rename(columns={"weight": "mcap"})
+        legs["w"] = _cap_ownership(legs, ownership_cap, leg_capital)
     return legs[["date", "stock_id", "leg", "w", "next_return"]]
 
 
@@ -261,15 +324,25 @@ def scaled_spread(legs: pd.DataFrame, sign: int) -> pd.Series:
 
 def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
                     cost_panel: pd.DataFrame, factor: str, family: str,
-                    direction: str, raw_weight) -> dict:
+                    direction: str, raw_weight, ownership_cap: float | None = None,
+                    n: int = N_QUINTILES, legs_fn=None) -> dict:
     """One :func:`regression.render_alpha_table` row for ``factor``: build its
-    cap-weighted quintile book (via ``raw_weight``) with the recorded orientation
-    and reuse Experiment 1's regression / cost helpers to measure the
-    industry-neutral alpha, Sharpe, beta-neutral Sharpe and turnover cost, full
-    sample and 2016+.
+    cap-weighted book (via ``raw_weight``, sorted into ``n`` buckets, optionally
+    ownership-capped at ``ownership_cap``) with the recorded orientation and reuse
+    Experiment 1's regression / cost helpers to measure the industry-neutral alpha,
+    Sharpe, beta-neutral Sharpe and turnover cost, full sample and 2016+.
+
+    ``legs_fn`` overrides how the tidy ``date, stock_id, leg, w, next_return`` book
+    is built (default :func:`scaled_legs`); it is called as
+    ``legs_fn(panel, factor, sign, n)`` and lets sibling drivers (e.g.
+    ``confidence_scaling``) plug in a different within-leg weighting while reusing
+    the whole regression / cost / ranking pipeline below.
     """
     sign = 1 if direction == "Q5-Q1" else -1
-    legs = scaled_legs(panel, factor, raw_weight)
+    if legs_fn is None:
+        legs = scaled_legs(panel, factor, raw_weight, n=n, ownership_cap=ownership_cap)
+    else:
+        legs = legs_fn(panel, factor, sign, n)
     spread = scaled_spread(legs, sign)
     recent = spread.index >= DECADE_START
     ind_recent = industry_ret[industry_ret.index >= DECADE_START]
@@ -298,9 +371,12 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
     sharpe_cost_neutral_2016 = regression.net_of_cost_neutral_sharpe(
         spread, cost_series, industry_ret, start=DECADE_START)
 
+    # Direction label matches the bucket count (Q5-Q1 quintile, T3-T1 tertile, ...).
+    prefix = {5: "Q", 3: "T", 2: "H"}.get(n, "B")
+    dir_label = (f"{prefix}{n}-{prefix}1" if sign > 0 else f"{prefix}1-{prefix}{n}")
     return {
         "factor": factor, "family": family,
-        "direction": "Q5-Q1" if sign > 0 else "Q1-Q5",
+        "direction": dir_label,
         "alpha": mreg["alpha"], "alpha_tstat": mreg["alpha_tstat"],
         "sharpe": ls["sharpe"], "sharpe_neutral": sr_neutral,
         "sharpe_cost": sharpe_cost, "sharpe_cost_neutral": sharpe_cost_neutral,
@@ -315,11 +391,14 @@ def evaluate_factor(panel: pd.DataFrame, industry_ret: pd.Series,
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def run(raw_weight, title: str, out_png: Path, label: str) -> pd.DataFrame:
-    """Re-evaluate every factor across all sources with cap-weighted quintile books
-    (within-leg weighting given by ``raw_weight``), rank by the sum of the
-    full-period and 2016+ net-of-cost beta-neutral Sharpe ratios (as ``main.py`` ranks
-    the top factors), and render the whole table to ``out_png``.  Returns the ranked table."""
+def run(raw_weight, title: str, out_png: Path, label: str,
+        ownership_cap: float | None = None, n: int = N_QUINTILES,
+        legs_fn=None) -> pd.DataFrame:
+    """Re-evaluate every factor across all sources with cap-weighted books (within-leg
+    weighting given by ``raw_weight``, sorted into ``n`` buckets, optionally
+    ownership-capped at ``ownership_cap``), rank by the sum of the full-period and
+    2016+ net-of-cost beta-neutral Sharpe ratios (as ``main.py`` ranks the top
+    factors), and render the whole table to ``out_png``.  Returns the ranked table."""
     # One cost panel for the whole run: every software library shares the same
     # Software & Services universe, so the per-(stock, month) costs are identical.
     cost_panel = cost.build_cost_panel(F.SOFTWARE_SERVICES)
@@ -336,7 +415,8 @@ def run(raw_weight, title: str, out_png: Path, label: str) -> pd.DataFrame:
         print(f"--- {src['label']}: {len(directions)} factors ---")
         for r in directions.itertuples(index=False):
             row = evaluate_factor(panel, industry_ret, cost_panel,
-                                  r.factor, r.family, r.direction, raw_weight)
+                                  r.factor, r.family, r.direction, raw_weight,
+                                  ownership_cap=ownership_cap, n=n, legs_fn=legs_fn)
             row["subexperiment"] = src["label"]
             rows.append(row)
             print(f"  {row['factor']:<26} [{src['label']:<10}] {row['direction']}  "
@@ -532,6 +612,25 @@ if __name__ == "__main__":
     for _w in WEIGHTINGS:
         print(f"\n===== weighting: {_w['label']} =====")
         run(_w["raw_weight"], _w["title"], _w["out_png"], _w["label"])
+
+    # The RAW (equal-weighted) book, additionally water-filled so no single name's
+    # point-in-time ownership exceeds OWNERSHIP_CAP (0.5%): any breach is pushed down
+    # to the cap and the rest of the leg absorbs the freed weight.  Run for both the
+    # QUINTILE (top/bottom fifth) and TERTILE (top/bottom third) sort.
+    for _n, _bkt in [(N_QUINTILES, "QUINTILE"), (3, "TERTILE")]:
+        _third = "quintile" if _n == N_QUINTILES else "third"
+        _fname = "quintile_long_short_market_alpha.png" if _n == N_QUINTILES else \
+                 "tertile_long_short_market_alpha.png"
+        print(f"\n===== raw equal-weighted {_bkt} book (0.5% ownership cap) =====")
+        run(_equal_weight,
+            f"Long-short {_bkt} strategy (repositioned QUARTERLY) with equal-weighted "
+            f"legs (single-name ownership capped at {OWNERSHIP_CAP:.1%}), regressed on the "
+            f"industry return\n(long top {_third} / short bottom {_third}; within each leg "
+            "w_i equal, then any name over the ownership cap pushed to it and the rest "
+            "absorbing the weight;  ls_t = α + β·industry_t + ε,  "
+            "α = industry-neutral monthly return, t-stat tests α ≠ 0)",
+            _THIS_DIR / "output" / "ownership_threshold" / _fname,
+            "equal", ownership_cap=OWNERSHIP_CAP, n=_n)
 
     # Sqrt-cap capacity scaling applied to Experiment 3's bivariate tertile double
     # sorts -- both :data:`BIVARIATE_PAIRS` (or a CLI-supplied two-factor pair),

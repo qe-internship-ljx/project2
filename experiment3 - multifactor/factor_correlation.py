@@ -5,8 +5,7 @@ factor_correlation.py
 Experiment 3 -- **how much of an industry factor is already explained by the
 general market factors of Experiment 1?**
 
-For one *target* factor (an industry-specific signal -- e.g. the software
-``buyback_quality`` of Experiment 2) this measures its association with each of
+For one *target* factor this measures its association with each of
 Experiment 1's general market factors through the **R-squared of a linear
 regression** of the target exposure on the market factor.
 
@@ -42,9 +41,6 @@ Outputs (``output/factor_correlation/<target>/``)
     r2_table.png     per market factor: n, corr, R^2, slope (+ joint row), rendered
                      and shaded by R^2
 
-Run standalone::
-
-    python factor_correlation.py            # buyback_quality vs the 9 market factors
 """
 
 from __future__ import annotations
@@ -185,7 +181,7 @@ def factor_r2_table(target_factor: str,
 
     Parameters
     ----------
-    target_factor : the industry factor to evaluate (e.g. ``"buyback_quality"``).
+    target_factor : the industry factor to evaluate.
     target_panel  : panel holding the target factor's exposures.
     market_panel  : panel holding the general market factors.
     regressor_col : exposure column to use (default ``"zscore"``).

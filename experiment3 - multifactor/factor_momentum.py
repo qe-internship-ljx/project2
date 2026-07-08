@@ -65,9 +65,8 @@ columns = tertile on its #2).
 Outputs (``output/factor_momentum/``)
 -------------------------------------
 ``univariate/`` -- the 3-monthly single-factor rotation:
-    factor_momentum_cumulative.png   growth of $1 in the rotation
-    selection_timeline.png           which factor is held each month + how often
-    performance.png                  rotation performance (full / 2016+), with the alpha
+    quintile_selection_timeline.png           which factor is held each month + how often
+    quintile_performance.png                  rotation performance (full / 2016+), with the alpha
                                      and largest single-name ownership for a $100M book
 ``bivariate/`` -- the 3-monthly-reselected double sort of the trailing-12m top two:
     grid_mean_return.png             3x3 tertile grid, cell returns averaged over all months
@@ -262,28 +261,6 @@ def rotation_cost(factor_names: list[str], chosen: pd.Series) -> pd.Series:
 # --------------------------------------------------------------------------- #
 # Plotting
 # --------------------------------------------------------------------------- #
-def plot_cumulative(rotated: pd.Series, factor_names: list[str], sharpe: float,
-                    alpha: float, alpha_tstat: float, path: Path) -> None:
-    """Cumulative growth of $1 in the factor-momentum rotation."""
-    cum_rot = (1.0 + rotated.fillna(0.0)).cumprod()
-    fig, ax = plt.subplots(figsize=(11, 5))
-    ax.plot(cum_rot.index, cum_rot, color="C2", linewidth=1.5,
-            label="Factor-momentum rotation")
-    ax.axhline(1.0, color="black", linewidth=0.6)
-    ax.set_yscale("log")
-    ax.set_title(
-        "Factor-momentum long-short: every 3 months hold the trailing-12m best factor\n"
-        f"candidates: {', '.join(factor_names)}\n"
-        f"[Sharpe={sharpe:+.2f}, alpha={alpha:+.4%}/mo, t(alpha)={alpha_tstat:+.2f}]")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Cumulative value of $1 (log scale)")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(True, alpha=0.3, which="both")
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
-
-
 def plot_selection(chosen: pd.Series, factor_names: list[str], path: Path) -> None:
     """Which factor the rotation holds each month (timeline) and how often (bars)."""
     order = {f: i for i, f in enumerate(factor_names)}
@@ -363,17 +340,14 @@ def run_univariate(top: pd.DataFrame, spreads: pd.DataFrame,
     counts = (chosen.value_counts().rename_axis("factor").rename("months")
                     .reindex(factor_names).fillna(0).astype(int).to_frame())
 
-    plot_cumulative(rotated, factor_names,
-                    full["sharpe"], full["alpha"], full["alpha_tstat"],
-                    out_dir / "factor_momentum_cumulative.png")
-    plot_selection(chosen, factor_names, out_dir / "selection_timeline.png")
+    plot_selection(chosen, factor_names, out_dir / "quintile_selection_timeline.png")
     C.render_performance(
         windows, "Factor-momentum rotation: long-short performance",
         f"hold the trailing-12m best of: {', '.join(factor_names)}   |   "
         f"{len(rotated)} months ({start:%Y-%m} .. {end:%Y-%m})   |   "
         "alpha from regressing the book on the market-cap-weighted industry return.   "
         "Shading: |t| >= 1.65 (10%), 2.0 (5%).",
-        out_dir / "performance.png",
+        out_dir / "quintile_performance.png",
         extra_metrics=[C.ownership_metric()])
 
     # --- Console summary (ASCII only -- Windows cp1252 stdout) ------------- #

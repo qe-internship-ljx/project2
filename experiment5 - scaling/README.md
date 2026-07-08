@@ -17,10 +17,12 @@ sqrt:  w_i ∝ sqrt(mcap_usd_i)      # mild tilt toward larger, more liquid name
 log6:  w_i ∝ log(mcap_usd_i)^6     # steep tilt, concentrates on the largest names
 ```
 
-## Three pipelines
+## Pipelines
 
 Output is grouped by pipeline under `output/capacity_scaling/`
-(`univariate_scaled/`, `bivariate_scaled/`, `composite_scaled/`).
+(`univariate_scaled/`, `bivariate_scaled/`, `composite_scaled/`), plus the 0.5%
+ownership-capped raw equal-weighted variant under `output/ownership_threshold/` and
+the softmax-conviction half book under `output/confidence_scaling/`.
 
 **Univariate (`run`).** Re-evaluates **exactly the same factor universe as
 Experiment 2's `quarter_position.py`** (Experiment 1's general factors + every
@@ -35,8 +37,25 @@ and 2016+), ranked by combined (full + 2016+) net-of-cost beta-neutral Sharpe. O
 weighting scheme —
 
 ```
-output/capacity_scaling/univariate_scaled/long_short_market_alpha.png        # sqrt
-output/capacity_scaling/univariate_scaled/log6_long_short_market_alpha.png   # log6
+output/capacity_scaling/univariate_scaled/sqrt_quintile_long_short_market_alpha.png        # sqrt
+output/capacity_scaling/univariate_scaled/log6_quintile_long_short_market_alpha.png   # log6
+```
+
+**Ownership threshold (`run(_equal_weight, ..., ownership_cap=)`).** The **raw
+equal-weighted** quintile book (not the capacity-weighted ones above), re-evaluated
+under a **0.5% point-in-time single-name ownership ceiling**: starting from equal
+within-leg weights, any name whose position (per-leg capital × its within-leg weight)
+would own more than 0.5% of its own market cap is pushed down to the 0.5% weight, and
+the freed weight is redistributed pro-rata across the still-uncapped names,
+water-filled until nothing breaches the cap (`_cap_ownership`). Where a whole leg is
+cap-bound the leg simply holds less than 100% — the honest capacity limit. Everything
+else is the standard equal-weighted book's, so the table reads directly against it.
+Run for both the **quintile** (top/bottom fifth) and **tertile** (top/bottom third)
+sort. Output: two alpha tables —
+
+```
+output/ownership_threshold/long_short_market_alpha.png           # quintile, equal-weighted, 0.5% cap
+output/ownership_threshold/tertile_long_short_market_alpha.png   # tertile,  equal-weighted, 0.5% cap
 ```
 
 **Bivariate (`run_bivariate`).** Applies the sqrt weighting to Experiment 3's
@@ -64,6 +83,23 @@ output/capacity_scaling/composite_scaled/quarter_quintile_performance.png   # qu
 output/capacity_scaling/composite_scaled/quarter_tertile_performance.png    # tertile sort
 ```
 
+**Confidence (`confidence_scaling.py`).** A conviction tilt rather than a capacity
+one, applied to each factor's **quarter-half** book (long the top half, short the
+bottom half — the coarsest sort). Within each leg every name is weighted by the
+**softmax of its leg-oriented cross-sectional z-score** (`w_i ∝ exp(z_i)`, with `z`
+flipped to `−z` in the short leg so a large positive oriented score always means
+strong conviction *for that leg*), so the highest-conviction names carry the most
+capital and the softmax does the work of picking out the names a finer bucket sort
+would have isolated. Everything else — the same factor universe, the quarterly-held
+sort, orientation, regression / cost / ranking / rendering pipeline — is
+`capacity_scaling`'s, reused via its `evaluate_factor(..., legs_fn=)` override
+(`confidence_scaling` adds only the leg builder). The half-book direction label is
+`H2-H1` / `H1-H2`. Output: one alpha table —
+
+```
+output/confidence_scaling/softmax_half_long_short_market_alpha.png   # half, softmax(z-score)-weighted
+```
+
 ## Reuse
 
 Experiment 1's `factors` / `cost` / `regression` are imported off `sys.path`
@@ -75,7 +111,8 @@ This experiment adds **only** the within-leg weighting schemes.
 ## Run
 
 ```bash
-python capacity_scaling.py    # univariate (sqrt + log6) + default bivariate pairs + both composite rankings
+python capacity_scaling.py      # univariate (sqrt + log6) + default bivariate pairs + both composite rankings
+python confidence_scaling.py    # softmax(z-score)-weighted quarter-half book
 ```
 
 Requires Experiments 1–3 to have been run first (it reads their factor panels

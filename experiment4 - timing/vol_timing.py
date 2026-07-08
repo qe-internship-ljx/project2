@@ -55,14 +55,14 @@ Run standalone::
 The single output is one consolidated performance table under
 ``experiment4 - timing/output/vol_timing/``:
 
-    vol_timing_performance.png   ONE consolidated performance table (project house
-                                 style, one row per factor -- the vol-timed book):
-                                 gross (cost-free)
-                                 L/S & beta-neutral Sharpe, the combined after-cost
-                                 ("Sharpe net cost") Sharpe, the % activation (share
-                                 of months the VVIX gate holds the book),
-                                 industry-neutral alpha & beta, average cost --
-                                 full sample and 2016+
+    vol_timing_quintile_performance.png   ONE consolidated performance table (project house
+                                        style, one row per factor -- the vol-timed book):
+                                        gross (cost-free)
+                                        L/S & beta-neutral Sharpe, the combined after-cost
+                                        ("Sharpe net cost") Sharpe, the % activation (share
+                                        of months the VVIX gate holds the book),
+                                        industry-neutral alpha & beta, average cost --
+                                        full sample and 2016+
 """
 
 from __future__ import annotations
@@ -316,10 +316,10 @@ def run(out_dir: Path = OUTPUT_DIR) -> pd.DataFrame:
     # the candidates panel-by-panel, not by rank).
     perf = pd.DataFrame([row for factor in candidates["factor"]
                          for row in perf_by_factor[factor]])
-    C.R.render_alpha_table(perf, out_dir / "vol_timing_performance.png", title=_PERF_TITLE)
+    C.R.render_alpha_table(perf, out_dir / "vol_timing_quintile_performance.png", title=_PERF_TITLE)
 
     print(f"\nSaved consolidated performance table -> "
-          f"{out_dir / 'vol_timing_performance.png'}")
+          f"{out_dir / 'vol_timing_quintile_performance.png'}")
     return perf
 
 

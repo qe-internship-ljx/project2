@@ -38,9 +38,9 @@ Five ways to combine the factors, sharing one spine (plus the redundancy tool):
 [`main.py`](main.py) orchestrates all five pipelines, each in its own
 subprocess (they share the dependency-injected Experiment 1 engine, so they must
 not share an interpreter), in dependency order: `composite` →
-`weighted_composite` → `bivariate_gate` (twice: the default
-`return_stability × gross_profitability` pair, then
-`revenue_stability × gross_profitability`, so both books stay current) →
+`weighted_composite` → `bivariate_gate` (both default pairs:
+`revenue_stability × gross_profitability` and
+`return_stability × gross_profitability`, so both books stay current) →
 `factor_momentum` → `portfolio_overlay`.
 
 The weighted variant is described under
@@ -117,8 +117,8 @@ python -c "from composite import run; run(['earnings_yield','sue','beta'])"
 python weighted_composite.py                                 # coefficient-weighted, expanding-window walk-forward
 python weighted_composite.py buyback_quality gross_profitability rd_stability
 
-python bivariate_gate.py                                     # double sort, default pair (return_stability x gross_profitability)
-python bivariate_gate.py revenue_stability gross_profitability
+python bivariate_gate.py                                     # double sort, both default pairs (revenue_stability & return_stability x gross_profitability)
+python bivariate_gate.py return_stability gross_profitability   # one explicit pair
 python factor_momentum.py                                    # univariate rotation + bivariate top-two double sort
 python portfolio_overlay.py                                  # equal-capital overlay of the top-5 books
 ```
@@ -220,7 +220,7 @@ these.
 
 `gross_profitability` carries the dominant, strongly significant premium;
 `revenue_stability` adds a smaller positive tilt. How each weight and its t-stat
-evolve as the window grows is plotted in `paths.png` (weights on top, clustered
+evolve as the window grows is plotted in `beta_paths.png` (weights on top, clustered
 t-stats below) — the
 `gross_profitability` weight drifts down from ~0.57%→~0.26% as more (lower-premium)
 history accrues, but its clustered t-stat stays firmly above 4 throughout.
@@ -247,7 +247,7 @@ history accrues, but its clustered t-stat stays firmly above 4 throughout.
   industry β (−0.09), so the raw mean (+0.62%/mo, t = 3.17) is itself significant;
   β-hedging (with a walk-forward, expanding-window β) lifts the Sharpe modestly
   from 0.73 to 0.80.
-- **Stable weights.** `paths.png` shows both weights are smooth and never flip
+- **Stable weights.** `beta_paths.png` shows both weights are smooth and never flip
   sign; the ranking is driven throughout by `gross_profitability`, with
   `revenue_stability` a steady secondary tilt.
 - **Adds alpha over the weaker leg, not the stronger.** Regressed on each
@@ -272,7 +272,8 @@ defined identically to every other book in the project.
 
 **`bivariate_gate.py` — independent double sort.** Every month the
 cross-section is split into three equal-count tertiles on each of two factors
-(default pair: `return_stability` × `gross_profitability`); the book is long the
+(two default pairs: `revenue_stability` × `gross_profitability` and
+`return_stability` × `gross_profitability`); the book is long the
 T3∩T3 corner and short the T1∩T1 corner, equal-weighted within each leg. A
 coarser **half-intersection** rule (median split, ~1/4 of names per corner
 instead of ~1/9) is reported alongside to show whether the edge survives a
@@ -290,8 +291,8 @@ earned the most over the trailing 12 months (all realised, look-ahead-free) and
 hold it until the next selection;
 *bivariate* — every 3 months take the trailing-12m **top two** factors and trade
 their `bivariate_gate` double sort, re-selecting the pair every 3 months. Outputs
-land under `output/factor_momentum/{univariate,bivariate}/` (cumulative growth,
-selection timeline / grid diagnostic, `performance.png`).
+land under `output/factor_momentum/{univariate,bivariate}/` (selection timeline /
+grid diagnostic, `performance.png`).
 
 **`portfolio_overlay.py` — naive diversification baseline.** Hold all five
 top-factor standalone books at once, 1/5 of capital each. Unlike `composite.py`
@@ -299,7 +300,7 @@ top-factor standalone books at once, 1/5 of capital each. Unlike `composite.py`
 *portfolios*; the five signed weight vectors are **netted per name** before the
 cost model charges turnover, so a stock long in one book and short in another
 only pays cost on the residual trade. Output:
-`output/portfolio_overlay/performance.png`.
+`output/portfolio_overlay/quintile_performance.png`.
 
 ## Factor redundancy — `factor_correlation.py`
 

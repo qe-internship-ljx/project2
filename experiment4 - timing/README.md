@@ -2,14 +2,21 @@
 
 Tests whether the software factors' long/short books earn their premia when
 traded **only in favourable months**. The base book each overlay gates is the
-factor's **quarterly-repositioned** Q5−Q1 book (the project-wide convention); only
-the in/out gate is a monthly decision. Two timing signals are tried, one
-factor-specific and one market-wide, each applied to **every** ranked factor:
+factor's **quarterly-repositioned** top-minus-bottom book (the project-wide
+convention); only the in/out gate is a monthly decision. Two timing signals are
+tried, one factor-specific and one market-wide, each applied to **every** ranked
+factor:
 
 | Module | Signal | Enter the book when | Candidates |
 |---|---|---|---|
-| `spread_timing.py` | the factor's own **value spread** — the monthly Q5−Q1 gap in raw (un-z-scored) factor values | the spread is **above its trailing 6-month average** (wide dispersion = more to be paid for ranking on the factor) | **every** ranked factor (`quarter_position.ranked_factors`, `n=None`) |
+| `spread_timing.py` | the factor's own **value spread** — the monthly top-minus-bottom gap in raw (un-z-scored) factor values | the spread is **above its trailing 12-month average** (wide dispersion = more to be paid for ranking on the factor) | **every** ranked factor (`quarter_position.ranked_factors`, `n=None`) |
 | `vol_timing.py` | the market's **volatility regime** — the VVIX index, 10-trading-day moving average (from `data/VolatilityIndexData.csv`) | the VVIX MA is **above 95** (elevated vol-of-vol regime) | **every** ranked factor (`quarter_position.ranked_factors`, `n=None`) |
+
+`spread_timing.py` runs its rule at **two bucket granularities** — the headline
+quintile (Q5−Q1) book and, identically, the tertile (Q3−Q1) book — threading a
+single bucket count `n` through the spread signal, the traded book and the table.
+Each granularity reads its own `n`-bucket ranking as the candidate set (matching
+`composite.py`'s quintile/tertile convention).
 
 Both signals are formation-date characteristics (the spread and its trailing
 average, or the last VVIX MA on or before the rebalance date), so entry into
@@ -19,10 +26,10 @@ month `t+1` uses only information known at month-end `t` — no look-ahead.
 
 For each candidate factor:
 
-1. **Timed book.** The bullish-oriented quarterly Q5−Q1 spread is the shared
-   `factor_momentum.signed_spread` (`quarter_position.quarter_held_spread`) — no
-   return is recomputed — then zeroed out in months where the timing flag is off
-   (the book sits in cash).
+1. **Timed book.** The bullish-oriented quarterly top-minus-bottom spread is the
+   shared `quarter_position.quarter_held_spread` (the primitive behind
+   `factor_momentum.signed_spread`), formed on `n` buckets — no return is recomputed
+   — then zeroed out in months where the timing flag is off (the book sits in cash).
 2. **Cost.** `cost.turnover_cost` charges turnover on the factor's quarterly-held
    legs, passing the timing flag as the `active` mask so exits and re-entries are
    priced (a month spent in cash is free, but leaving and re-entering the book is not).
@@ -41,8 +48,9 @@ For each candidate factor:
    below what a significant alpha implies. The `n` column is thus the count of
    activated months, and `% activation` is their share of the common sample.
 4. **Output.** One consolidated alpha table with a row per factor (the timed
-   book): `output/spread_timing_performance.png` and
-   `output/vol_timing_performance.png`.
+   book): `output/vol_timing_quintile_performance.png`, and for `spread_timing.py` one table
+   per granularity — `output/spread_timing_quintile_performance.png` (quintile, headline) and
+   `output/spread_timing_tertile_performance.png` (tertile).
 
 ## Reuse
 
@@ -55,7 +63,7 @@ signals and their timed-book evaluation.
 ## Run
 
 ```bash
-python spread_timing.py    # every ranked factor, dispersion-timed
+python spread_timing.py    # every ranked factor, dispersion-timed (quintile + tertile)
 python vol_timing.py       # every ranked factor, VVIX-regime-timed
 ```
 

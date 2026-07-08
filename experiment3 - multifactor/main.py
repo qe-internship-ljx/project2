@@ -21,15 +21,15 @@ Each pipeline lives in its own module and already runs standalone via
 standalone pipeline.
 
 Like Experiment 2's ``main.py``, this adds no new analytics -- it just invokes
-each module's own ``main`` with its default factor set (plus a second
-``bivariate_gate.py`` run for the revenue_stability x gross_profitability
-pair, so that book is refreshed alongside the default one).  Each module wires
+each module's own ``main`` with its default factor set (for
+``bivariate_gate.py`` that is both default pairs -- revenue_stability and
+return_stability, each gated against gross_profitability).  Each module wires
 Experiment 1's engine into ``sys.modules`` at import time (via ``composite``),
 so to keep every run pristine and isolated -- and to match the documented
 ``python <module>.py`` standalone path -- each is run in its own subprocess.  A
 failure in one is reported and the rest continue.
 
-Before running the pipelines, this driver also renders ``output/top5_factors.png``:
+Before running the pipelines, this driver also renders ``output/top5_quintile_factors.png``:
 the five constituent factors every multifactor book below is built from (the top
 five of Experiment 2's quarterly-repositioned ranking), shown in the project's
 standard long/short alpha-table format -- the Experiment 3 counterpart of
@@ -53,14 +53,13 @@ _THIS_DIR = Path(__file__).resolve().parent
 # Every runnable pipeline in dependency-agnostic logical order (each is isolated
 # in its own subprocess, so ordering is for readability, not correctness).  Each
 # entry is the full argv after the interpreter: module path plus any CLI args.
-# ``bivariate_gate.py`` runs twice -- its default pair, then the
-# revenue_stability pair -- so both books stay current with pipeline changes.
+# ``bivariate_gate.py`` runs both default pairs (revenue_stability and
+# return_stability, each x gross_profitability) in its own ``main``.
 # ``factor_correlation.py`` has no ``main`` and is excluded by design.
 _PIPELINES = [
     [_THIS_DIR / "composite.py"],
     [_THIS_DIR / "weighted_composite.py"],
     [_THIS_DIR / "bivariate_gate.py"],
-    [_THIS_DIR / "bivariate_gate.py", "revenue_stability", "gross_profitability"],
     [_THIS_DIR / "factor_momentum.py"],
     [_THIS_DIR / "portfolio_overlay.py"],
 ]
@@ -69,7 +68,7 @@ _PIPELINES = [
 def render_top5_table() -> None:
     """Render the five constituent factors -- the top five of Experiment 2's
     cross-experiment ranking, the set every multifactor book here is built from --
-    as a standard long/short alpha table (``output/top5_factors.png``).
+    as a standard long/short alpha table (``output/top5_quintile_factors.png``).
 
     Reuses ``composite.ranked_factors`` (the shared quarterly top-factor hand-off)
     and Experiment 1's ``render_alpha_table``, so the table is defined identically to
@@ -78,7 +77,7 @@ def render_top5_table() -> None:
     top = C.ranked_factors(C.TOP_N).copy()
     top["family"] = top["family"] + "  [" + top["subexperiment"] + "]"
     C.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_png = C.OUTPUT_DIR / "top5_factors.png"
+    out_png = C.OUTPUT_DIR / "top5_quintile_factors.png"
     C.R.render_alpha_table(
         top, out_png,
         title="Experiment 3 constituents -- top 5 factors of Experiment 2's "
