@@ -618,7 +618,9 @@ def _fmt_cell(value, kind: str) -> str:
 
 def render_performance(windows: list[tuple[str, dict]], title: str,
                        subtitle: str, path: Path,
-                       extra_metrics: list[tuple[str, str, str, bool]] | None = None
+                       extra_metrics: list[tuple[str, str, str, bool]] | None = None,
+                       keep_keys: list[str] | None = None,
+                       bold_keys: list[str] | None = None
                        ) -> None:
     """
     Render long/short performance across one or more named windows as a PNG.
@@ -639,6 +641,18 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
     :func:`attach_net_cost_sharpe`) a combined "Sharpe net of cost" row is inserted
     beside the gross Sharpe -- the raw and beta-neutral net-of-cost Sharpe in one
     cell (``raw / β-neut``).
+
+    ``keep_keys`` optionally restricts the table to a subset of metric keys (the
+    second element of each row tuple), rendered **in the given key order** rather
+    than the default assembly order; any listed key not present is silently
+    skipped.  ``None`` (the default) keeps every assembled row, so existing callers
+    are unaffected.
+
+    ``bold_keys`` optionally renders the whole row (metric label + every window
+    cell) of the listed metric keys in **bold**, to draw the eye to a headline
+    figure -- e.g. the net-of-cost Sharpe.  ``None`` (the default) bolds nothing, so
+    existing callers are unaffected.  The combined net-of-cost Sharpe row is keyed
+    ``sharpe_cost`` (matching the row inserted above).
     """
     metrics = list(PERF_METRICS)
     # Cost-incorporated Sharpe sits next to the gross β-neutral Sharpe when every
@@ -654,6 +668,11 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
         metrics += [m for m in extra_metrics if all(m[1] in s for _, s in windows)]
     if windows and all("avg_cost" in s for _, s in windows):
         metrics.append(("Avg monthly cost (turnover)", "avg_cost", "pct", False))
+
+    # Optional row subset, rendered in the caller's requested key order.
+    if keep_keys is not None:
+        by_key = {m[1]: m for m in metrics}
+        metrics = [by_key[k] for k in keep_keys if k in by_key]
 
     headers = ["Metric"] + [label for label, _ in windows]
     cell_text, cell_colors = [], []
@@ -684,6 +703,14 @@ def render_performance(windows: list[tuple[str, dict]], title: str,
         tbl[0, j].set_facecolor("#404040")
     for i in range(1, nrows + 1):
         tbl[i, 0].set_text_props(ha="left")
+
+    # Bold every cell of the requested metric rows (label + each window value).
+    if bold_keys:
+        bold_set = set(bold_keys)
+        for i, (_name, key, _kind, _shade) in enumerate(metrics, start=1):
+            if key in bold_set:
+                for j in range(ncols):
+                    tbl[i, j].set_text_props(fontweight="bold")
 
     fig.suptitle(title, fontsize=11, y=0.99)
     # Wrap the "   |   "-separated clauses onto their own lines so the caption

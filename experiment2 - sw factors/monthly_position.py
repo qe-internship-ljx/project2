@@ -17,7 +17,7 @@ Two roles
    ``regression.py`` **unmodified** via dependency injection
    (``driver_utils.wire_engine`` binds ``factors`` -> ``sw_factors`` before
    importing them, so their ``F`` resolves to the software factors with zero
-   changes to Experiment 1).  Results land in ``standard/`` mirroring the
+   changes to Experiment 1).  Results land in ``literature/`` mirroring the
    Experiment 1 layout one-for-one.
 
 2. **The monthly re-evaluation** (:func:`run` / :func:`run_all`).  Re-evaluate
@@ -98,7 +98,7 @@ sys.path.insert(0, str(_EXP1_DIR))
 
 # --- Dependency injection for the *driver* role: bind ``factors`` -> ``sw_factors``
 #     and import Experiment 1's ``quintile`` / ``regression`` against it, so the
-#     Standard pipeline (:func:`main`) runs on the software factors with zero changes
+#     Literature pipeline (:func:`main`) runs on the software factors with zero changes
 #     to Experiment 1.  This must precede any ``import regression`` (its ``F`` binds
 #     at first import) -- so ``wire_engine`` runs *before* the ``cost`` / ``regression``
 #     / ``factors`` imports below.
@@ -136,7 +136,7 @@ def dir_label(sign: int, n: int) -> str:
 # single source of truth for "the tested factor set"; ``quarter_position.py`` and
 # ``experiment5 .../capacity_scaling.py`` import it by path.
 # --------------------------------------------------------------------------- #
-_EXP2_LIBS = ["Standard", "RD", "Stability", "Skew"]
+_EXP2_LIBS = ["Literature", "RD", "Stability", "Skew"]
 
 
 def _source(label: str, panel: Path, alpha_csv: Path) -> dict:
@@ -351,7 +351,7 @@ def run_all() -> dict[str, pd.DataFrame]:
 
 
 # --------------------------------------------------------------------------- #
-# Experiment 2 driver: Standard pipeline -> subexperiments -> collection
+# Experiment 2 driver: Literature pipeline -> subexperiments -> collection
 # --------------------------------------------------------------------------- #
 # Each subexperiment lives in its own subfolder with its own factor library and
 # ``main_*.py`` driver doing the same ``import factors as F`` injection this file
@@ -414,7 +414,7 @@ def collect_top_factors(top_n: int = TOP_N) -> pd.DataFrame:
 
 def main() -> None:
     D.run_pipeline(S, UNIVERSE, "software factor", quintile, regression,
-                   done_suffix=" (Standard)")
+                   done_suffix=" (Literature)")
 
     # Run the remaining subexperiments (each in its own process, see above).
     run_subexperiments()

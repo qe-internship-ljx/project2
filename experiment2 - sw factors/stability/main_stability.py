@@ -19,12 +19,13 @@ mirroring the Experiment 1 / Experiment 2 layout one-for-one::
       quintile/    <factor>/...
                                   + long_short_market_alpha.{csv,png}
       regression/  <factor>/...   + summary.csv + summary_table.png
-      factor_correlation/<factor>/...   redundancy of each stability factor vs
-                                        the Exp1 general market factors
+      factor_correlation/{zscore,return}_correlation.png   correlation of the
+                                        stability factors vs the Exp1 general market factors
 
-The ``factor_correlation`` step reuses Experiment 3's panel-agnostic
-``factor_correlation.run`` to quantify how little of each stability factor is
-spanned by the Exp1 general market factors.
+The ``factor_correlation`` step delegates to ``correlation_matrix.run``: two
+chosen-factor × general-factor matrices -- z-score exposure correlation and
+Q5-Q1 long-short return correlation -- quantifying how much each stability factor
+overlaps the Exp1 general market factors.
 
 Run standalone::
 

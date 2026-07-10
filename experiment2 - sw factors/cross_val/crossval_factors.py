@@ -2,33 +2,33 @@
 crossval_factors.py
 ===================
 
-**Cross-validation** of Experiment 2's **top factors** on the **Banks + Insurance +
+**Cross-validation** of a fixed five-factor panel on the **Banks + Insurance +
 Commodity Producers** universe -- the union of Experiment 1's two non-software
 cross-sections (financials + resources), a structurally unrelated test bed that is
 broad enough to probe generalisation without the cost of the whole market.  The
 same market-cap screen the software libraries apply is used.
 
-The candidate set is no longer a hand-picked pair -- it is the **top ``TOP_N``
-factors** of the *quarterly-repositioned* cross-experiment ranking
-(``quarter_position.ranked_factors``), sliced the *same way* Experiment 3's
-``factor_momentum.py`` / ``composite.py`` slice it (pre-sorted by industry-neutral
-alpha t-stat, so the first ``TOP_N`` rows are the leaders).  Each
-was discovered and validated on GICS *Software & Services*; this module asks the
-out-of-sample-universe question: **do the software-industry leaders survive in
+The candidate set is a **fixed, hand-picked panel of five** factors
+(:data:`CROSSVAL_FACTORS`): the quality anchor ``gross_profitability`` and the
+low-risk anchor ``beta`` from the general library, plus one representative tailored
+factor from each of the RD / Stability / Skew libraries (``rd_stability`` /
+``revenue_growth_stability`` / ``revenue_growth_skewness``).  Each was discovered
+and validated on GICS *Software & Services*; this module asks the
+out-of-sample-universe question: **do the software-industry factors survive in
 structurally unrelated industries** (financials + resources), or were they
 software-specific?
 
-Reuse -- test the *exact* construct that earned the ranking
------------------------------------------------------------
-The factors in the hand-off live in several source libraries (Experiment 1's
-general factors plus Experiment 2's software subexperiments), each of which is a
+Reuse -- test the *exact* construct discovered on software
+----------------------------------------------------------
+The five factors live in several source libraries (Experiment 1's general factors
+plus Experiment 2's software subexperiments), each of which is a
 **universe-parameterised** drop-in for Experiment 1's engine.  Rather than
 re-implement (or copy) each definition here, this module **reuses the source
 library verbatim**: for every requested factor it looks up its source
 subexperiment (the ``subexperiment`` column of the quarterly ranking), runs that
 library's own :func:`build` on the **Banks + Insurance** universe, and keeps just
 that factor's rows.  So the construct cross-validated here is byte-for-byte the
-one that produced the software-industry ranking -- if a source definition changes,
+one discovered on the software universe -- if a source definition changes,
 this test tracks it with no edit.
 
 Like every factor library in the project it is also a **drop-in for Experiment
@@ -37,7 +37,7 @@ regressions, long/short books, trading-cost model and every plot are reused
 **verbatim** from ``experiment1 - general factors/{quintile,regression,cost}.py``
 via the shared engine in ``experiment1 - general factors/factors.py``.  The only
 things that change relative to the software subexperiments are (a) the factor set
-(the top-``TOP_N`` hand-off, resolved to their source libraries) and (b) the
+(the fixed five, resolved to their source libraries) and (b) the
 **universe**: this library runs on the ``BANKS_COMMODITY`` universe (Banks +
 Insurance + Commodity Producers), writing to the ``cross_val/`` folder.
 
@@ -63,14 +63,13 @@ Run standalone to (re)build the panel::
 
     python crossval_factors.py
 
-To run the full pipeline (panel + quintile sorts + regressions + redundancy)::
+To run the full pipeline (panel + the L/S alpha table + comparison bar plot)::
 
     python main_crossval.py
 """
 
 from __future__ import annotations
 
-import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
@@ -124,17 +123,20 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # This module lives in (and writes to) experiment2's cross_val/ subfolder, so the
 # cross-validation outputs land in their own subtree (cross_val/{factor_panel.csv,
-# quintile/, regression/, factor_correlation/}) and never collide with the
-# software-universe libraries.
+# quintile/long_short_market_alpha.*}) and never collide with the software-universe
+# libraries.
 OUTPUT_DIR = Path(__file__).resolve().parent
 
-# Experiment 2's factor-selection hand-off is the *quarterly*-repositioned ranking
-# ``quarter_position.py`` persists to ``Factor Ranking/quarter_{label}_ranked.csv``.
-# We test its top-N leaders -- read straight from the quintile CSV, sliced the same
-# way Experiment 3 slices it.  (This module lives in Experiment 2, beside the
-# ranking's producer, so it reads its CSV directly rather than importing Experiment
-# 3's ``composite`` and inverting the dependency.)
-TOP_N = 5
+# The cross-validation set is a **fixed, hand-picked panel of five** factors, one
+# per source library plus the two strongest general signals: the quality anchor
+# (``gross_profitability``), the low-risk anchor (``beta``), and one representative
+# tailored factor from each of the RD / Stability / Skew libraries
+# (``rd_stability`` / ``revenue_growth_stability`` / ``revenue_growth_skewness``).
+# We read each factor's authoritative direction and family straight from the
+# quarterly-quintile ranking CSV (so a source-definition change tracks through with
+# no edit here) and keep only these five rows, in this order.
+CROSSVAL_FACTORS = ("gross_profitability", "beta", "rd_stability",
+                    "revenue_growth_stability", "revenue_growth_skewness")
 
 # Sign the directional long/short book by each factor's canonical (software-
 # discovered) prior rather than the in-sample Fama-MacBeth t-stat, so the realised
@@ -143,35 +145,37 @@ USE_CANONICAL_LS_DIRECTION = True
 
 
 # --------------------------------------------------------------------------- #
-# Factor Ranking -> the factor set (sliced the same way Experiment 3 slices it)
+# Factor Ranking -> the fixed cross-validation factor set (read for direction/family)
 # --------------------------------------------------------------------------- #
 _RANKED_CSV = _EXP2_DIR / "Factor Ranking" / "quarter_quintile_ranked.csv"
 
 
-def load_top_factors(n: int = TOP_N) -> pd.DataFrame:
-    """The top-``n`` factors of Experiment 2's **quarterly-repositioned** ranking,
-    pre-sorted by combined net-of-cost beta-neutral Sharpe -- one row per factor
+def load_top_factors(factors: tuple[str, ...] = CROSSVAL_FACTORS) -> pd.DataFrame:
+    """The fixed cross-validation panel -- one row per factor in :data:`CROSSVAL_FACTORS`,
     carrying its ``factor`` name, source ``subexperiment``, bullish ``direction`` and
-    ``family``.
+    ``family``, in the requested order.
 
     Read straight from the CSV ``quarter_position.run`` persists
-    (``Factor Ranking/quarter_quintile_ranked.csv``, the hand-off
-    ``quarter_position.ranked_factors`` also reads).  Reading the ranking rather than
+    (``Factor Ranking/quarter_quintile_ranked.csv``).  Reading the ranking rather than
     recomputing it means this driver -- which injects *this* cross-validation library
     under the ``factors`` / ``cost`` / ``regression`` names -- never has to load the
     generic-engine ``quarter_position`` module, so there is no ``sys.modules``
-    collision to guard against."""
+    collision to guard against, and each factor's direction/family stays authoritative."""
     if not _RANKED_CSV.exists():
         raise FileNotFoundError(
             f"{_RANKED_CSV} not found; run Experiment 2's quarter_position.py first "
             "(python 'quarter_position.py') to persist the quarterly ranking.")
-    return pd.read_csv(_RANKED_CSV).head(n).reset_index(drop=True)
+    ranked = pd.read_csv(_RANKED_CSV).set_index("factor")
+    missing = [f for f in factors if f not in ranked.index]
+    if missing:
+        raise KeyError(f"cross-validation factors absent from the ranking: {missing}")
+    return ranked.loc[list(factors)].reset_index()
 
 
-# The active top-factor table and the module-level constants the analysis engine
+# The active factor table and the module-level constants the analysis engine
 # expects (``FACTOR_NAMES`` / ``FACTORS[name]{family, higher_is_bullish}``), built
-# from the hand-off.  ``direction == 'Q5-Q1'`` => the bullish leg is the top
-# z-score quintile, i.e. higher_is_bullish.
+# from the fixed cross-validation panel.  ``direction == 'Q5-Q1'`` => the bullish
+# leg is the top z-score quintile, i.e. higher_is_bullish.
 TOP_FACTORS = load_top_factors()
 FACTOR_NAMES = TOP_FACTORS["factor"].tolist()
 FACTORS: dict[str, dict] = {
@@ -242,24 +246,6 @@ def universe_from_argv(default: Universe = BANKS_COMMODITY) -> Universe:
     return default
 
 
-# Redundancy benchmark: Experiment 1's *full* general market factor set, built on
-# this SAME (banks+insurance+commodity, cap-screened) universe -- the only valid
-# same-universe comparison for the factor_correlation step.  It writes to a
-# dedicated subfolder so it never collides with this library's own factor_panel.csv.
-GENERAL_MARKET = dataclasses.replace(
-    BANKS_COMMODITY, slug="cross_universe_general", output_dir=OUTPUT_DIR / "general_market")
-
-
-def build_general_market_panel(rebuild: bool = False) -> Path:
-    """Build (or reuse) Experiment 1's full general market factor panel on the SAME
-    (banks+insurance+commodity, cap-screened) universe -- the redundancy benchmark
-    for the factor_correlation step -- by reusing Experiment 1's engine verbatim.
-    Returns the panel path."""
-    if rebuild or not GENERAL_MARKET.panel_path.exists():
-        _engine.build(save=True, u=GENERAL_MARKET)
-    return GENERAL_MARKET.panel_path
-
-
 # --------------------------------------------------------------------------- #
 # Source libraries -- resolve each top factor to the library that computes it
 # --------------------------------------------------------------------------- #
@@ -270,7 +256,7 @@ def build_general_market_panel(rebuild: bool = False) -> Path:
 # all its factors on universe ``u`` and returns the tidy (date, stock_id, factor,
 # value, zscore, next_return, weight) panel -- so we reuse the exact construct.
 _SOURCE_LIB_PATHS: dict[str, Path] = {
-    "Standard":   _EXP2_DIR / "sw_factors.py",
+    "Literature": _EXP2_DIR / "sw_factors.py",
     "RD":         _EXP2_DIR / "rd" / "rd_factors.py",
     "Stability":  _EXP2_DIR / "stability" / "stability_factors.py",
     "Skew":       _EXP2_DIR / "skew" / "skew_factors.py",

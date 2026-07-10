@@ -22,7 +22,7 @@ standalone pipeline.
 
 Like Experiment 2's ``main.py``, this adds no new analytics -- it just invokes
 each module's own ``main`` with its default factor set (for
-``bivariate_gate.py`` that is both default pairs -- revenue_stability and
+``bivariate_gate.py`` that is both default pairs -- revenue_growth_stability and
 return_stability, each gated against gross_profitability).  Each module wires
 Experiment 1's engine into ``sys.modules`` at import time (via ``composite``),
 so to keep every run pristine and isolated -- and to match the documented
@@ -53,7 +53,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 # Every runnable pipeline in dependency-agnostic logical order (each is isolated
 # in its own subprocess, so ordering is for readability, not correctness).  Each
 # entry is the full argv after the interpreter: module path plus any CLI args.
-# ``bivariate_gate.py`` runs both default pairs (revenue_stability and
+# ``bivariate_gate.py`` runs both default pairs (revenue_growth_stability and
 # return_stability, each x gross_profitability) in its own ``main``.
 # ``factor_correlation.py`` has no ``main`` and is excluded by design.
 _PIPELINES = [

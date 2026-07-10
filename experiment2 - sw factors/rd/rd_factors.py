@@ -16,7 +16,7 @@ and every plot are reused **verbatim** from
 engine in ``experiment1 - general factors/factors.py``.  Only the *factor
 definitions* and the fundamentals they need are new here, and the universe's
 ``output_dir`` is the ``rd/`` folder itself, so these factors never collide with
-the established software factors of ``sw_factors.py`` (which write to ``standard/``).
+the established software factors of ``sw_factors.py`` (which write to ``literature/``).
 
 Motivation
 ----------

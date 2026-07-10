@@ -10,9 +10,9 @@ only in *which* factor library it injects and the labels it prints:
    Experiment 1's analysis modules against it (:func:`wire_engine`);
 2. build the library's factor panel;
 3. run the engine's quintile + regression pipelines on the shared panel;
-4. regress each factor on the general market factors for redundancy
-   (:func:`run_correlation_analysis`, reusing Experiment 3's panel-agnostic
-   ``factor_correlation.py``).
+4. correlate the chosen factors with the general market factors for redundancy
+   (:func:`run_correlation_analysis`, delegating to ``correlation_matrix.py`` --
+   two chosen × general matrices, z-score and Q5-Q1 return).
 
 :func:`run_pipeline` is steps 2-4; each driver keeps only its library import,
 its universe and its labels.  The ``sys.modules["factors"]`` binding is cached
@@ -22,7 +22,6 @@ per Python process, so drivers still must not share an interpreter --
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 
@@ -52,24 +51,27 @@ def wire_engine(library):
     return quintile, regression
 
 
-def load_factor_correlation():
-    """Load Experiment 3's panel-agnostic factor_correlation module by path
-    (its folder name contains spaces, so it cannot be imported normally)."""
-    spec = importlib.util.spec_from_file_location(
-        "exp2_factor_correlation", EXP3_DIR / "factor_correlation.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+def load_correlation_matrix():
+    """Load Experiment 2's ``correlation_matrix`` module, making Experiment 3's
+    panel-agnostic ``factor_correlation`` importable by it first (both folder
+    names contain spaces, so neither imports normally)."""
+    if str(EXP3_DIR) not in sys.path:
+        sys.path.insert(0, str(EXP3_DIR))
+    if str(_EXP2_DIR) not in sys.path:
+        sys.path.insert(0, str(_EXP2_DIR))
+    import correlation_matrix        # noqa: E402  (import after sys.path wiring)
+    return correlation_matrix
 
 
 def run_correlation_analysis(library, universe, label: str,
                              market_panel=None,
                              market_desc: str = "Exp1 general market factors") -> None:
     """
-    Quantify how much of each library factor is already explained by the
-    general market factors.  Writes one R^2 table per factor under
-    ``<universe.output_dir>/factor_correlation/<factor>/``.
+    Quantify how correlated the library's chosen factors are with the general
+    market factors, two lenses at once.  Writes exactly two PNGs directly under
+    ``<universe.output_dir>/factor_correlation/`` -- ``zscore_correlation.png``
+    (z-score exposures) and ``return_correlation.png`` (Q5-Q1 return series) --
+    each a chosen-factor × general-factor matrix (see ``correlation_matrix.py``).
 
     ``market_panel`` defaults to Experiment 1's software-universe panel (the
     valid benchmark for every software-universe library); a library on a
@@ -77,8 +79,6 @@ def run_correlation_analysis(library, universe, label: str,
     zero-argument callable returning one, built only when this step runs
     (see ``cross_val/main_crossval.py``).
     """
-    fc = load_factor_correlation()
-
     if market_panel is None:
         market_panel = GENERAL_SOFTWARE_PANEL
         if not market_panel.exists():
@@ -88,23 +88,24 @@ def run_correlation_analysis(library, universe, label: str,
     elif callable(market_panel):
         market_panel = market_panel()
 
-    corr_root = universe.output_dir / "factor_correlation"
-    print(f"\n--- Redundancy of {label}s vs general ({market_desc}) ---")
-    for factor in library.FACTOR_NAMES:
-        fc.run(target_factor=factor,
-               target_panel=universe.panel_path,
-               market_panel=market_panel,
-               out_dir=corr_root / factor,
-               include_market_cap=True)
+    cm = load_correlation_matrix()
+    print(f"\n--- Correlation of {label}s vs general ({market_desc}) ---")
+    cm.run(chosen_factors=list(library.FACTOR_NAMES),
+           target_panel=universe.panel_path,
+           market_panel=market_panel,
+           out_dir=universe.output_dir / "factor_correlation",
+           label=label)
 
 
 def run_pipeline(library, universe, label: str, quintile, regression, *,
                  panel_report=None, market_panel=None,
                  market_desc: str = "Exp1 general market factors",
+                 correlation: bool = True,
                  done_suffix: str = ""):
     """
     The shared driver flow: build the factor panel, run the quintile and
-    regression pipelines on it, then the redundancy check.
+    regression pipelines on it, then (unless ``correlation`` is False) the
+    redundancy check against the general market factors.
 
     ``label`` is the singular noun used in headings (e.g. ``"R&D factor"`` ->
     "Building R&D factor panel", "R&D factors vs existing factors").
@@ -132,9 +133,10 @@ def run_pipeline(library, universe, label: str, quintile, regression, *,
     print("\n=== Approach 2: cross-sectional regressions ===")
     regression.run(panel=panel, u=universe)
 
-    print(f"\n=== Redundancy check: {label}s vs existing factors ===")
-    run_correlation_analysis(library, universe, label,
-                             market_panel=market_panel, market_desc=market_desc)
+    if correlation:
+        print(f"\n=== Redundancy check: {label}s vs existing factors ===")
+        run_correlation_analysis(library, universe, label,
+                                 market_panel=market_panel, market_desc=market_desc)
 
     print(f"\nDone{done_suffix}. All outputs under {universe.output_dir}")
     return panel

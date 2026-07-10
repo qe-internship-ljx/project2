@@ -62,7 +62,7 @@ output/ownership_threshold/tertile_long_short_market_alpha.png   # tertile,  equ
 double-sort corners: the T3∩T3 / T1∩T1 legs come from
 `bivariate_gate.double_sorted` (imported by path), sqrt-cap-weighted within
 each corner. Default pairs: `return_stability × gross_profitability` and
-`revenue_stability × gross_profitability` (or pass pairs on the CLI). Each pair
+`revenue_growth_stability × gross_profitability` (or pass pairs on the CLI). Each pair
 is benchmarked against its constituents' standalone books and reports the
 largest single-name ownership for a $100M book. Output: one performance table
 per pair under `output/capacity_scaling/bivariate_scaled/`.

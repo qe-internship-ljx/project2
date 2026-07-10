@@ -4,7 +4,7 @@ quarter_position.py
 
 Re-evaluate **exactly the same set of factors** as ``monthly_position.py`` --
 Experiment 1's general market factors plus every Experiment 2 software subexperiment
-(Standard, RD, Stability, Skew) -- with the same long/short book, but
+(Literature, RD, Stability, Skew) -- with the same long/short book, but
 **repositioned quarterly instead of monthly**.
 
 Three bucketings are produced (see :data:`BUCKETINGS`), one alpha table each:

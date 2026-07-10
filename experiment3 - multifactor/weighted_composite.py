@@ -61,7 +61,7 @@ Outputs (``output/weighted/<slug>/``)
 
 Run standalone::
 
-    python weighted_composite.py                                          # default set (revenue_stability + gross_profitability)
+    python weighted_composite.py                                          # default set (revenue_growth_stability + gross_profitability)
     python weighted_composite.py buyback_quality gross_profitability rd_stability
 """
 
@@ -88,7 +88,7 @@ OUTPUT_DIR = C.OUTPUT_DIR
 
 # The weighted deliverable's factor set (the factors whose marginal premia we
 # weight by).  Distinct from composite.py's equal-weighted top-five set.
-DEFAULT_FACTORS = ["revenue_stability", "gross_profitability"]
+DEFAULT_FACTORS = ["revenue_growth_stability", "gross_profitability"]
 
 
 # --------------------------------------------------------------------------- #

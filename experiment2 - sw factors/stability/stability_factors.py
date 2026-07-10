@@ -8,7 +8,7 @@ mean), and write a tidy monthly panel to ``stability/factor_panel.csv``.
 
 This module, its driver and its outputs all live in experiment2's
 ``stability/`` subfolder.  It is one of Experiment 2's factor libraries
-(alongside ``sw_factors.py`` -> ``Standard/``, ``rd_factors.py`` -> ``RD/``
+(alongside ``sw_factors.py`` -> ``literature/``, ``rd_factors.py`` -> ``RD/``
 and ``skew_factors.py`` -> ``Skew/``).  Like the others it is a **drop-in for
 Experiment 1's analysis engine**: the quintile sorts, cross-sectional
 (Fama-MacBeth) regressions, long/short books, trading-cost model and every plot
@@ -34,7 +34,7 @@ basis.
 
     name                              definition                                                        dir         dimension
     --------------------------------  ----------------------------------------------------------------  ----------  -----------
-    revenue_stability                 - trailing 36m std of YoY revenue growth                          long high   revenue durability (2nd moment)
+    revenue_growth_stability          - trailing 36m std of YoY revenue growth                          long high   revenue durability (2nd moment)
     cashflow_stability                - trailing 12m coeff. of variation of OCF margin                  long high   cash-generation consistency
     return_stability                  - trailing 12m std of monthly return                             long high   return consistency (low-vol)
     gross_profitability_stability     - trailing 12m coeff. of variation of GP/assets                   long high   gross-profitability consistency
@@ -45,12 +45,12 @@ signals and use a **trailing 12-month** window: a short window makes each score 
 each name's history.  ``return_stability`` shares that 12-month window but is the
 dispersion of the (already unitless, near-zero-mean) return stream, so it uses a
 plain standard deviation rather than a coefficient of variation -- no mean scaling.
-``revenue_stability`` is a *growth*-consistency signal (the dispersion of the
+``revenue_growth_stability`` is a *growth*-consistency signal (the dispersion of the
 top-line growth *rate*, not of a level), so it likewise uses a plain standard
 deviation -- because YoY growth is already scale-free -- but over a longer
 **trailing 36-month** window on the YoY growth series.
 
-* ``revenue_stability`` is the negative trailing-36m standard deviation of YoY
+* ``revenue_growth_stability`` is the negative trailing-36m standard deviation of YoY
   revenue growth, per stock.  High (near 0) => a smooth, predictable, recurring
   (subscription-like) top line; low (very negative) => lumpy license/deal revenue
   with renewal/air-pocket risk.  A second moment of the top line, so it is
@@ -199,7 +199,7 @@ MIN_MEAN_REL = 0.10         # the trailing |mean| must be at least this fraction
 # in-sample t-stat), so a negative realised alpha t-stat means the factor worked
 # *against* the hypothesis -- exactly what we want for hypothesis testing.
 FACTORS: dict[str, dict] = {
-    "revenue_stability":     {"family": "Revenue stability (recurring-revenue durability)", "higher_is_bullish": True},
+    "revenue_growth_stability":     {"family": "Revenue stability (recurring-revenue durability)", "higher_is_bullish": True},
     "cashflow_stability":    {"family": "Cash-flow stability (OCF-margin consistency)",      "higher_is_bullish": True},
     "return_stability":      {"family": "Return stability (monthly-return consistency)",     "higher_is_bullish": True},
     "gross_profitability_stability": {"family": "Gross-profitability stability (GP/assets consistency)", "higher_is_bullish": True},
@@ -370,7 +370,7 @@ def _neg_coeff_of_variation(p: pd.DataFrame, x: pd.Series,
 # --------------------------------------------------------------------------- #
 # Factor definitions
 # --------------------------------------------------------------------------- #
-def _f_revenue_stability(p: pd.DataFrame) -> pd.Series:
+def _f_revenue_growth_stability(p: pd.DataFrame) -> pd.Series:
     """
     Recurring-revenue durability: the NEGATIVE trailing-36m standard deviation of
     YoY revenue growth, per stock.  High (near 0) => a smooth, predictable,
@@ -436,7 +436,7 @@ def _f_gross_profitability_stability(p: pd.DataFrame) -> pd.Series:
 
 
 _FACTOR_FUNCS = {
-    "revenue_stability": _f_revenue_stability,
+    "revenue_growth_stability": _f_revenue_growth_stability,
     "cashflow_stability": _f_cashflow_stability,
     "return_stability": _f_return_stability,
     "gross_profitability_stability": _f_gross_profitability_stability,

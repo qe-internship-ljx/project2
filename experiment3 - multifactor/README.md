@@ -39,7 +39,7 @@ Five ways to combine the factors, sharing one spine (plus the redundancy tool):
 subprocess (they share the dependency-injected Experiment 1 engine, so they must
 not share an interpreter), in dependency order: `composite` →
 `weighted_composite` → `bivariate_gate` (both default pairs:
-`revenue_stability × gross_profitability` and
+`revenue_growth_stability × gross_profitability` and
 `return_stability × gross_profitability`, so both books stay current) →
 `factor_momentum` → `portfolio_overlay`.
 
@@ -117,7 +117,7 @@ python -c "from composite import run; run(['earnings_yield','sue','beta'])"
 python weighted_composite.py                                 # coefficient-weighted, expanding-window walk-forward
 python weighted_composite.py buyback_quality gross_profitability rd_stability
 
-python bivariate_gate.py                                     # double sort, both default pairs (revenue_stability & return_stability x gross_profitability)
+python bivariate_gate.py                                     # double sort, both default pairs (revenue_growth_stability & return_stability x gross_profitability)
 python bivariate_gate.py return_stability gross_profitability   # one explicit pair
 python factor_momentum.py                                    # univariate rotation + bivariate top-two double sort
 python portfolio_overlay.py                                  # equal-capital overlay of the top-5 books
@@ -143,7 +143,7 @@ quarterly-repositioned hand-off the composite is built from; `<word>` below is
 The default composite blends Experiment 2's five top-ranked factors — the top
 five of the quarterly-repositioned `quarter_position.ranked_factors` hand-off that
 `factor_momentum.py` also rotates across: `gross_profitability`, `fscore`,
-`rd_stability`, `revenue_stability`, `buyback_quality`. Summing their sign-oriented
+`rd_stability`, `revenue_growth_stability`, `buyback_quality`. Summing their sign-oriented
 z-scores fuses weakly-correlated quality / R&D-commitment / capital-discipline /
 durability signals into one score, so they carry largely **additive** information.
 
@@ -164,7 +164,7 @@ and are unchanged.
 - **The composite beats every constituent.** Its industry-neutral alpha t-stat
   (5.34) exceeds each standalone factor's — the strongest constituent,
   `gross_profitability`, reaches 4.40 (`fscore` 4.11, `rd_stability` 4.08,
-  `buyback_quality` 3.20, `revenue_stability` 3.06) — the diversification benefit of
+  `buyback_quality` 3.20, `revenue_growth_stability` 3.06) — the diversification benefit of
   combining weakly-correlated signals (plan §1). The alpha (1.16%/mo) is larger
   than any single factor's too.
 - **Near-monotonic sort.** Cumulative growth is ordered with Q5 highest and Q1
@@ -184,7 +184,7 @@ and are unchanged.
 Instead of an equal-weighted straight sum, weight each constituent by its
 **estimated return premium**, re-estimated **quarterly on an expanding window** and
 traded strictly walk-forward, with the resulting quintile membership held for the
-quarter. The default set here is **`revenue_stability` + `gross_profitability`**,
+quarter. The default set here is **`revenue_growth_stability` + `gross_profitability`**,
 with an initial training period through **2006** and the book traded from **2007
 onwards** (configurable via `INITIAL_TRAIN_END`).
 
@@ -215,11 +215,11 @@ these.
 | Term | Coef (= premium, ind-rel %/mo per 1σ) | t (OLS) | t (cluster) |
 |---|---:|---:|---:|
 | intercept | +0.043% | +1.09 | +1.02 |
-| `revenue_stability` | +0.074% | +1.83 | +0.90 |
+| `revenue_growth_stability` | +0.074% | +1.83 | +0.90 |
 | `gross_profitability` | +0.264% | +6.41 | **+4.66** |
 
 `gross_profitability` carries the dominant, strongly significant premium;
-`revenue_stability` adds a smaller positive tilt. How each weight and its t-stat
+`revenue_growth_stability` adds a smaller positive tilt. How each weight and its t-stat
 evolve as the window grows is plotted in `beta_paths.png` (weights on top, clustered
 t-stats below) — the
 `gross_profitability` weight drifts down from ~0.57%→~0.26% as more (lower-premium)
@@ -235,7 +235,7 @@ history accrues, but its clustered t-stat stays firmly above 4 throughout.
 | Industry-neutral α (monthly) | +0.721% |
 | α t-stat | **+3.64** |
 | β-neutral Sharpe (walk-forward β) | +0.80 |
-| α vs `revenue_stability` book | +0.462% (t = **+3.02**) |
+| α vs `revenue_growth_stability` book | +0.462% (t = **+3.02**) |
 | α vs `gross_profitability` book | +0.110% (t = +1.08) |
 | Avg monthly cost (turnover) | +0.044% |
 
@@ -249,10 +249,10 @@ history accrues, but its clustered t-stat stays firmly above 4 throughout.
   from 0.73 to 0.80.
 - **Stable weights.** `beta_paths.png` shows both weights are smooth and never flip
   sign; the ranking is driven throughout by `gross_profitability`, with
-  `revenue_stability` a steady secondary tilt.
+  `revenue_growth_stability` a steady secondary tilt.
 - **Adds alpha over the weaker leg, not the stronger.** Regressed on each
   constituent's standalone book, the weighted composite earns a significant
-  +0.46%/mo (t = 3.02) above `revenue_stability` alone, but only an insignificant
+  +0.46%/mo (t = 3.02) above `revenue_growth_stability` alone, but only an insignificant
   +0.11%/mo (t = 1.08) above `gross_profitability` alone — so the blend mostly
   tracks its dominant leg and adds little beyond simply holding it.
 
@@ -272,7 +272,7 @@ defined identically to every other book in the project.
 
 **`bivariate_gate.py` — independent double sort.** Every month the
 cross-section is split into three equal-count tertiles on each of two factors
-(two default pairs: `revenue_stability` × `gross_profitability` and
+(two default pairs: `revenue_growth_stability` × `gross_profitability` and
 `return_stability` × `gross_profitability`); the book is long the
 T3∩T3 corner and short the T1∩T1 corner, equal-weighted within each leg. A
 coarser **half-intersection** rule (median split, ~1/4 of names per corner

@@ -5,7 +5,7 @@ sw_factors.py
 Compute the **established software-industry factors** of the project plan
 (section 2.2) on the GICS *Software & Services* universe, standardise each cross-
 sectionally (z-score relative to the industry mean), and write a tidy monthly
-panel to ``standard/factor_panel.csv``.
+panel to ``literature/factor_panel.csv``.
 
 This is Experiment 2.  It is a *drop-in factor library* for Experiment 1's
 analysis machinery: the heavy lifting -- quintile sorts, cross-sectional
@@ -27,17 +27,14 @@ Established software factors (plan section 2.2):
     intangible_profitability (operating_income_ltm + R&D) / (assets + K_int)    long high
     rd_productivity          d(sales_ltm, YoY) / K_int                          long high
     buyback_quality          realized share reduction - gross buyback yield     long high
-    fscore                   Piotroski F-score (0-9 fundamental strength)        long high
-    zscore                   Altman Z-score (distance-to-default / solvency)     long high
 
 (The standalone realized-dilution test was dropped per the updated project
 proposal; buyback_quality retains the share-count change as one of its inputs.)
 
-``fscore`` (Piotroski 2000) and ``zscore`` (Altman 1968) are textbook composite
-fundamental-quality / financial-distress scores; both are supplied pre-computed
-in ``fundamental_master`` and used here verbatim as factor values (higher = a
-financially stronger / less distress-prone firm), so the established-quality
-literature is represented alongside the software-specific signals.
+All four signals are software-specific restatements of value, quality, R&D output
+and capital discipline; the textbook composite scores (Piotroski F-score, Altman
+Z-score) that once anchored this library have been removed, as F-score merely
+re-expressed the general quality premium and Z-score inverted inside software.
 
 The search for genuinely new software-industry factors (plan section 3.2) is
 pursued separately in the R&D-behaviour extension (``rd/``), which extrapolates
@@ -114,7 +111,7 @@ ols = _engine.ols
 # --------------------------------------------------------------------------- #
 # Paths & configuration
 # --------------------------------------------------------------------------- #
-OUTPUT_DIR = Path(__file__).resolve().parent / "standard"
+OUTPUT_DIR = Path(__file__).resolve().parent / "literature"
 
 INDUSTRY_GROUP = "Software & Services"
 
@@ -132,8 +129,6 @@ FACTORS: dict[str, dict] = {
     "intangible_profitability": {"family": "Intangible quality",          "higher_is_bullish": True},
     "rd_productivity":          {"family": "R&D productivity",            "higher_is_bullish": True},
     "buyback_quality":          {"family": "Buyback quality",             "higher_is_bullish": True},
-    "fscore":                   {"family": "Piotroski F-score",           "higher_is_bullish": True},
-    "zscore":                   {"family": "Altman Z-score",              "higher_is_bullish": True},
 }
 FACTOR_NAMES = list(FACTORS)
 
@@ -177,8 +172,8 @@ def software_universe(output_dir: Path) -> Universe:
     )
 
 
-# This module writes to standard/; outputs mirror the Experiment 1 layout
-# one-for-one: standard/{factor_panel.csv, quintile/..., regression/...}.
+# This module writes to literature/; outputs mirror the Experiment 1 layout
+# one-for-one: literature/{factor_panel.csv, quintile/..., regression/...}.
 SOFTWARE_SERVICES = software_universe(OUTPUT_DIR)
 
 UNIVERSES: dict[str, Universe] = {SOFTWARE_SERVICES.slug: SOFTWARE_SERVICES}
@@ -211,8 +206,7 @@ def load_fundamentals(universe: pd.Index) -> pd.DataFrame:
     """
     base_cols = ["date_fundamental", "observation_date", "stock_id",
                  "assets", "book_value", "sales_ltm", "operating_income_ltm",
-                 "sga_ltm", "rd_ltm", "buyback_ltm",
-                 "fscore", "zscore"]   # pre-computed Piotroski / Altman scores
+                 "sga_ltm", "rd_ltm", "buyback_ltm"]
     fm = pd.read_feather(DATA_DIR / "fundamental_master.feather", columns=base_cols)
     fm["stock_id"] = fm["stock_id"].astype(str)
     fm = fm[fm["stock_id"].isin(universe)].copy()
@@ -351,27 +345,11 @@ def _f_buyback_quality(p: pd.DataFrame) -> pd.Series:
     return realized_reduction - buyback_yield
 
 
-def _f_fscore(p: pd.DataFrame) -> pd.Series:
-    # Piotroski (2000) F-score: sum of 9 binary fundamental-health tests
-    # (profitability, leverage/liquidity, operating efficiency), 0-9.  Supplied
-    # pre-computed; higher = financially stronger.  Used verbatim as the value.
-    return p["fscore"].astype(float)
-
-
-def _f_zscore(p: pd.DataFrame) -> pd.Series:
-    # Altman (1968) Z-score: weighted sum of five solvency/profitability ratios;
-    # higher = further from financial distress.  Supplied pre-computed; used
-    # verbatim (cross-sectional winsorisation downstream tames the heavy tails).
-    return p["zscore"].astype(float)
-
-
 _FACTOR_FUNCS = {
     "intangible_value": _f_intangible_value,
     "intangible_profitability": _f_intangible_profitability,
     "rd_productivity": _f_rd_productivity,
     "buyback_quality": _f_buyback_quality,
-    "fscore": _f_fscore,
-    "zscore": _f_zscore,
 }
 
 

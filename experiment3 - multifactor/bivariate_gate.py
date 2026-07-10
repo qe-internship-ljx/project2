@@ -69,7 +69,7 @@ The two selection rules each get their own subfolder of parallel files:
 Run standalone::
 
     python bivariate_gate.py                                   # both default pairs
-    python bivariate_gate.py revenue_stability gross_profitability   # one explicit pair
+    python bivariate_gate.py revenue_growth_stability gross_profitability   # one explicit pair
 """
 
 from __future__ import annotations
@@ -91,12 +91,12 @@ F, R = C.F, C.R
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_FACTORS = ["revenue_stability", "gross_profitability"]
+DEFAULT_FACTORS = ["revenue_growth_stability", "gross_profitability"]
 # The two default double-sort pairs run when no CLI factors are given -- both
 # stability factors gated against gross_profitability.  ``main()`` runs each in
 # turn (``DEFAULT_FACTORS`` is the first pair, kept as the bare-call default).
 DEFAULT_PAIRS = [
-    ["revenue_stability", "gross_profitability"],
+    ["revenue_growth_stability", "gross_profitability"],
     ["return_stability", "gross_profitability"],
 ]
 N_TILES = 3                                  # tertiles
@@ -547,7 +547,7 @@ def main() -> None:
     if args:
         run(args)
         return
-    # No CLI factors: run both default pairs (revenue_stability and
+    # No CLI factors: run both default pairs (revenue_growth_stability and
     # return_stability, each gated against gross_profitability).
     for pair in DEFAULT_PAIRS:
         run(pair)

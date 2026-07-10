@@ -465,7 +465,7 @@ _C = _bivariate.C
 # two-factor pair.
 BIVARIATE_PAIRS = [
     ["return_stability", "gross_profitability"],
-    ["revenue_stability", "gross_profitability"],
+    ["revenue_growth_stability", "gross_profitability"],
 ]
 
 
@@ -550,7 +550,7 @@ def run_bivariate(factor_names: list[str] | None = None,
     # legs), not Experiment 3's fixed global list -- the question is whether the
     # double sort adds alpha above simply holding either standalone factor it is
     # built from.  For return_stability x gross_profitability this measures alpha
-    # above univariate return_stability, not the unrelated revenue_stability book.
+    # above univariate return_stability, not the unrelated revenue_growth_stability book.
     benchmark_factors = list(factor_names)
     benchmarks = {f: _C.factor_long_short(f) for f in benchmark_factors}
 
