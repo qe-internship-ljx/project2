@@ -31,7 +31,7 @@ and every downstream statistic are identical to the quintile pipeline, so each
 alpha table reads directly against the standard (equal-weighted) quintile book.
 
 The output is one alpha table per weighting scheme, in the *same* format as
-``experiment2 - sw factors/factor_ranking/quarter_quintile.png``.
+``experiment2 - sw factors/Factor Ranking/quarter_quintile.png``.
 
 Ownership threshold (0.5% single-name cap)
 ------------------------------------------
@@ -61,20 +61,6 @@ downstream statistic are the Experiment 3 driver's own (reused by path), so the
 rendered table reads directly against that experiment's equal-weighted
 ``bivariate_gate/<slug>/tertile/performance.png``.  It writes a single performance
 table per factor pair, grouped under ``output/capacity_scaling/bivariate_scaled/``.
-
-Composite extension (Experiment 3's composite z-score sort)
------------------------------------------------------------
-:func:`run_composite` applies the *same* sqrt(market-cap) within-leg tilt to
-**Experiment 3's composite z-score book** (``composite.py``), which sums the top
-five factors' sign-oriented z-scores into one score and longs the top bucket /
-shorts the bottom bucket of that composite.  Only the within-leg weighting changes
-from equal to sqrt-cap; the composite construction, the factor selection, the
-quarterly-held even-bucket sort, orientation, benchmark and every downstream
-statistic are Experiment 3's own (reused by path).  It is run over both of
-``composite.RANKINGS`` -- the ``quarter_quintile`` selection sorted into QUINTILES
-and the ``quarter_tertile`` selection sorted into TERTILES, each bucketed the way
-its constituents were ranked -- and writes one performance table per ranking,
-grouped under ``output/capacity_scaling/composite_scaled/``.
 
 Bucketing
 ---------
@@ -397,7 +383,7 @@ def run(raw_weight, title: str, out_png: Path, label: str,
     """Re-evaluate every factor across all sources with cap-weighted books (within-leg
     weighting given by ``raw_weight``, sorted into ``n`` buckets, optionally
     ownership-capped at ``ownership_cap``), rank by the sum of the full-period and
-    2016+ net-of-cost beta-neutral Sharpe ratios (as ``main.py`` ranks the top
+    2016+ net-of-cost beta-neutral Sharpe ratios (as ``quarter_position.py`` ranks the top
     factors), and render the whole table to ``out_png``.  Returns the ranked table."""
     # One cost panel for the whole run: every software library shares the same
     # Software & Services universe, so the per-(stock, month) costs are identical.
@@ -426,7 +412,7 @@ def run(raw_weight, title: str, out_png: Path, label: str,
     if not rows:
         raise FileNotFoundError(
             "No source alpha tables found; run Experiment 1 and the Experiment 2 "
-            "subexperiments first (python main.py).")
+            "subexperiments first (python monthly_position.py, then quarter_position.py).")
 
     table = pd.DataFrame(rows)
     table["sharpe_combined"] = (
@@ -435,7 +421,7 @@ def run(raw_weight, title: str, out_png: Path, label: str,
                   .reset_index(drop=True))
 
     # Render in the standard alpha-table format, tagging each family with its
-    # source subexperiment for provenance -- exactly like the tertile / factor_ranking PNG.
+    # source subexperiment for provenance -- exactly like the tertile / Factor Ranking PNG.
     plot_rows = table.copy()
     plot_rows["family"] = plot_rows["family"] + "  [" + plot_rows["subexperiment"] + "]"
     out_png.parent.mkdir(parents=True, exist_ok=True)

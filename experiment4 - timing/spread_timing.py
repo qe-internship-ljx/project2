@@ -15,7 +15,7 @@ in Experiment 2's cross-experiment ranking:
     *factor-value spread* -- the average raw factor value of the top quintile
     minus that of the bottom quintile, the same Q5/Q1 buckets the book trades.
     Enter the dollar-neutral long/short book for month ``t+1`` **only if** that
-    spread is above its own trailing 6-month average; otherwise sit in cash
+    spread is above its own trailing 12-month average; otherwise sit in cash
     (0 return) for that month.
 
 Both the spread at ``t`` and its trailing average are known at ``t`` (they are

@@ -17,8 +17,7 @@ results are catalogued in [Factors](#factors) and [Headline results](#headline-r
 
 > The standalone realized-dilution test was dropped per the updated project
 > proposal. The share-count change it measured is still used as one input to
-> `buyback_quality`. Four established factors remain, later joined by the
-> generic `fscore` / `zscore` composites read straight off `fundamental_master`.
+> `buyback_quality`. Four established factors remain.
 >
 > The *search for genuinely new* software-industry factors (§3.2) — extrapolating
 > the R&D activity software firms rely on — is pursued in the **R&D-behaviour
@@ -46,7 +45,7 @@ with **no change to Experiment 1**.
 
 ```
 sw_factors.py          # software factor library (drop-in for the engine's interface)
-monthly_position.py    # driver + monthly re-evaluation (was main.py + tertile.py):
+monthly_position.py    # driver + monthly re-evaluation (consolidates the driver and tertile re-evaluation):
                        #   wires sw_factors -> 'factors', runs quintile + regression, then the
                        #   software subexperiments, then the top-factor collection -- re-evaluating
                        #   EVERY factor with monthly QUINTILE (Q5-Q1), TERTILE (T3-T1) and HALF (H2-H1)
@@ -62,7 +61,7 @@ quarter_position.py    # re-evaluates the SAME factors with QUINTILE, TERTILE an
 literature/            # established §2.2 factors (outputs of sw_factors.py)
     factor_panel.csv
     quintile/   <factor>/{quintile_returns.csv, quintile_cumulative.png, long_short.png}
-                + summary.csv + long_short_market_alpha.{csv,png}   # alpha table incl. avg cost
+                + long_short_market_alpha.{csv,png}   # alpha table incl. avg cost
     regression/ <factor>/{regression.csv, beta.png} + summary.csv + summary_table.png
                 + normalized_regression.{csv,png}
     factor_correlation/ {zscore,return}_correlation.png   # chosen x general correlation:
@@ -96,25 +95,28 @@ full period and 2016+, ranking every factor by the sum of the two t-stats — th
 statistic `summary_table.png` reports, on the held-quarterly calendar rather than
 monthly.
 
-Each subexperiment folder mirrors `literature/`'s layout (`factor_panel.csv`,
+Each software subexperiment folder mirrors `literature/`'s layout (`factor_panel.csv`,
 `quintile/`, `regression/`, `factor_correlation/`) and is driven by its own
 `main_*.py`, which injects its factor library into the shared Experiment 1
 engine via `driver_utils.wire_engine` — exactly as `monthly_position.py` does for
 `sw_factors.py`. The build → quintile → regression → redundancy flow itself is
 `driver_utils.run_pipeline`; each driver keeps only its library, universe and
-labels. (`cross_val/` opts out of the `factor_correlation/` step via
-`run_pipeline(..., correlation=False)` — it is a re-test of factors whose
-redundancy is already established on the software universe.)
+labels. (`cross_val/` is the exception: it is deliberately minimal, producing only
+`factor_panel.csv`, the universe-neutral L/S alpha table
+`quintile/long_short_market_alpha.{csv,png}` and the software-vs-crossval
+comparison bar plot `quintile/compare_software_vs_crossval.png` — no per-factor
+plots, no `regression/` subtree and no `factor_correlation/` step, since each
+factor's redundancy is already established on the software universe.)
 
 ## Subexperiments
 
 | Folder | Library | Factors |
 |---|---|---|
-| `literature/` | `sw_factors.py` | `intangible_value`, `intangible_profitability`, `rd_productivity`, `buyback_quality`, `fscore`, `zscore` |
+| `literature/` | `sw_factors.py` | `intangible_value`, `intangible_profitability`, `rd_productivity`, `buyback_quality` |
 | `rd/` | `rd_factors.py` | `rd_growth`, `rd_conversion`, `rd_stability`, `innovation_mix`, `rd_intensity` — `rd_stability` is the keeper |
 | `stability/` | `stability_factors.py` | second moments of quality: `revenue_growth_stability`, `cashflow_stability`, `return_stability`, `gross_profitability_stability` |
 | `skew/` | `skew_factors.py` | `return_skewness`, `revenue_growth_skewness`, `eps_skewness` (all long-low: lottery/lumpiness aversion) |
-| `cross_val/` | `crossval_factors.py` | re-tests the top `TOP_N` ranked factors on the **Banks + Insurance + Commodity Producers** universe (excluded from the ranking — different cross-section) |
+| `cross_val/` | `crossval_factors.py` | re-tests the fixed five-factor panel `CROSSVAL_FACTORS` (`gross_profitability`, `beta`, `rd_stability`, `revenue_growth_stability`, `revenue_growth_skewness`) on the **Banks + Insurance + Commodity Producers** universe (excluded from the ranking — different cross-section) |
 
 After all subexperiments finish, `monthly_position.py` **collects** every
 factor (Experiment 1's general factors on the software universe + every software
@@ -135,11 +137,11 @@ experiment slices its own top N from it.
 ```bash
 python monthly_position.py          # Literature pipeline + software subexperiments + monthly quintile/tertile/half tables
 python monthly_position.py collect  # only (re)render the monthly quintile/tertile/half tables from existing CSVs
-python Cross_val/main_crossval.py   # run manually (resolves its top factors via quarter_position.ranked_factors)
+python cross_val/main_crossval.py   # run manually (re-tests the fixed CROSSVAL_FACTORS panel)
 python sw_factors.py      # rebuild the Literature factor panel only
 python quarter_position.py  # quarterly-repositioned re-evaluation (end Feb/May/Aug/Nov), quintile + tertile + half
                             #   -> Factor Ranking/quarter_{quintile,tertile,half}.png
-                            #   + quarter_{quintile,tertile,half}_ranked.csv (the persisted Exp 3-5 / Cross_val hand-off)
+                            #   + quarter_{quintile,tertile,half}_ranked.csv (the persisted Exp 3-5 hand-off)
                             #   + quarter_regression.png (quarterly cross-section regression of next-quarter return)
                             #   ranked_factors() reads those CSVs back
 ```
@@ -162,8 +164,6 @@ that prior.
 | `intangible_profitability` | (operating_income_ltm + R&D) / (assets + K_int) | long high |
 | `rd_productivity` | Δsales_ltm (YoY) / K_int | long high |
 | `buyback_quality` | realised share reduction − gross buyback yield | long high |
-| `fscore` | Piotroski F-score (from `fundamental_master`) | long high |
-| `zscore` | Altman Z-score (from `fundamental_master`) | long high |
 
 `buyback_quality` reconciles cash spent on buybacks against the *actual* fall in
 share count: `(1 − shares_t/shares_{t−12m}) − (−buyback_ltm / mcap)`. It is
@@ -226,11 +226,14 @@ is a trailing-36m sample skewness (a scale-invariant shape statistic).
 | `revenue_growth_skewness` | trailing 36m skewness of YoY revenue growth | long low |
 | `eps_skewness` | trailing 36m skewness of diluted EPS | long low |
 
-**Cross-validation (`cross_val/`).** No new definitions: it re-runs the *source
-library* of each of the top-`TOP_N` ranked factors (`TOP_N = 5`, by quarterly
-industry-neutral alpha t-stat) verbatim on the **Banks + Insurance + Commodity
-Producers** universe, asking whether the software-industry leaders generalise to
-structurally unrelated cross-sections. Coverage is itself a finding — `rd_stability`
+**Cross-validation (`cross_val/`).** No new definitions: it re-tests a **fixed
+five-factor panel** (`crossval_factors.CROSSVAL_FACTORS` — the quality anchor
+`gross_profitability`, the low-risk anchor `beta`, plus one tailored factor from
+each discovery library: `rd_stability`, `revenue_growth_stability`,
+`revenue_growth_skewness`), each signed by its canonical software-universe
+direction, on the **Banks + Insurance + Commodity Producers** universe, asking
+whether the software-industry leaders generalise to structurally unrelated
+cross-sections. Coverage is itself a finding — `rd_stability`
 in particular is thin where firms run little R&D.
 
 ## Trading cost
@@ -267,11 +270,9 @@ Sample runs 1998–2026 (per-factor month count varies with data coverage).
 | Factor | α/mo | t(α) | combined Sharpe |
 |---|---:|---:|---:|
 | `intangible_profitability` | +0.87% | **+3.15** | 1.38 |
-| `fscore` | +0.86% | **+4.02** | 1.47 |
 | `buyback_quality` | +0.75% | **+3.22** | 1.12 |
 | `intangible_value` | +0.51% | **+2.02** | 0.73 |
 | `rd_productivity` | −0.44% | −2.06 | −0.41 |
-| `zscore` | −0.80% | −2.57 | −0.90 |
 
 **R&D behaviour (`rd/`)**
 
@@ -303,8 +304,9 @@ Sample runs 1998–2026 (per-factor month count varies with data coverage).
 **Takeaways.**
 - **The stability library is the strongest discovery.** All four second-moment
   factors carry significant industry-neutral alpha, and `revenue_growth_stability` /
-  `return_stability` top the whole cross-experiment ranking by combined Sharpe
-  (1.82 / 1.59). `return_stability` measures dispersion with a **plain std** of
+  `return_stability` rank 1st and 3rd in the whole cross-experiment ranking by
+  combined Sharpe (1.82 / 1.59, with `gross_profitability` between them at 1.79).
+  `return_stability` measures dispersion with a **plain std** of
   monthly returns (not a coefficient of variation) — the low-volatility anomaly in
   its cleanest form.
 - **The R&D directed search yields exactly one keeper.** `rd_stability` (a *second
@@ -314,12 +316,12 @@ Sample runs 1998–2026 (per-factor month count varies with data coverage).
 - **Skew is a mixed bag.** `return_skewness` is significant (short lottery-like
   return streams), `eps_skewness` is not; the shape signals are weaker and turnover-
   sensitive relative to the stability complex.
-- **Among the established factors** `fscore`, `intangible_profitability` and
+- **Among the established factors** `intangible_profitability` and
   `buyback_quality` remain the durable performers; `rd_productivity` fails as a
-  level signal (its R&D content is better captured by `rd_stability`) and `zscore`
-  is outright negative in this universe.
+  level signal (its R&D content is better captured by `rd_stability`).
 - **Implication for Experiments 3–5.** The hand-off carries the leaders across
-  libraries — the stability factors, `rd_stability`, `fscore`,
-  `intangible_profitability` and `buyback_quality` — chosen for significant alpha,
-  low mutual correlation and (being slow, fundamental signals) low natural
-  turnover, so the cost-aware position selection downstream costs little to run.
+  libraries — the quintile top five are `revenue_growth_stability`,
+  `gross_profitability`, `return_stability`, `beta` and `rd_stability` — chosen
+  for significant alpha, low mutual correlation and (being slow, fundamental
+  signals) low natural turnover, so the cost-aware position selection downstream
+  costs little to run.

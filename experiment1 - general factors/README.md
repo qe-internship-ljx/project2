@@ -140,31 +140,31 @@ cost and Fama–MacBeth t-stats do not reference the benchmark and are unchanged
 
 | Factor | L/S dir | α/mo | α t-stat | Avg cost (pp/mo) | FM t (full) |
 |---|:--:|---:|---:|---:|---:|
-| `gross_profitability` | Q5−Q1 | +1.13% | **+4.33** | 0.037 | +3.83 |
-| `net_issuance` | Q1−Q5 | +0.78% | **+3.33** | 0.081 | −3.15 |
-| `earnings_yield` | Q5−Q1 | +0.81% | **+2.52** | 0.066 | −1.04 |
-| `accruals` | Q1−Q5 | +0.48% | **+2.17** | 0.079 | −1.34 |
-| `asset_growth` | Q1−Q5 | +0.52% | +1.91 | 0.087 | −1.99 |
-| `momentum_12m` | Q5−Q1 | +0.73% | +1.85 | 0.164 | +1.12 |
-| `sue` | Q5−Q1 | +0.41% | +1.85 | 0.101 | +1.17 |
-| `beta` | Q1−Q5 | +0.44% | +1.54 | 0.070 | +0.83 |
-| `reversal_1m` | Q1−Q5 | +0.28% | +0.83 | 0.581 | −1.74 |
+| `gross_profitability` | Q5−Q1 | +1.07% | **+4.40** | 0.047 | +3.77 |
+| `net_issuance` | Q1−Q5 | +0.60% | **+2.66** | 0.084 | −1.16 |
+| `earnings_yield` | Q5−Q1 | +0.79% | **+2.58** | 0.076 | +0.14 |
+| `beta` | Q1−Q5 | +0.65% | **+2.53** | 0.075 | +0.37 |
+| `sue` | Q5−Q1 | +0.46% | **+2.41** | 0.099 | +1.93 |
+| `accruals` | Q1−Q5 | +0.38% | +1.80 | 0.084 | −2.32 |
+| `momentum_12m` | Q5−Q1 | +0.62% | +1.72 | 0.162 | +0.71 |
+| `asset_growth` | Q1−Q5 | +0.35% | +1.44 | 0.092 | −1.43 |
+| `reversal_1m` | Q1−Q5 | +0.26% | +0.83 | 0.520 | −1.55 |
 
 **Takeaways.**
-- **Quality, capital-discipline and value lead.** `gross_profitability`,
-  `net_issuance` (long low issuance), `earnings_yield` and `accruals` all carry
-  significant industry-neutral alpha (t = 2.2–4.3) at low turnover cost
-  (~0.04–0.08 pp/month round-trip), so the cost barely dents the gross premium.
+- **Quality, capital-discipline, value and defensives lead.** `gross_profitability`,
+  `net_issuance` (long low issuance), `earnings_yield`, `beta` (long low beta) and
+  `sue` all carry significant industry-neutral alpha (t = 2.4–4.4) at low turnover
+  cost (~0.05–0.10 pp/month round-trip), so the cost barely dents the gross premium.
 - **Fast signals pay for it.** `reversal_1m` is the only book with material
-  turnover cost (~0.58 pp/month) — it rebalances almost entirely each month — and
+  turnover cost (~0.52 pp/month) — it rebalances almost entirely each month — and
   its alpha is insignificant once that is charged.
 - **The alpha sign follows the trade, not the premium.** Several factors with a
   negative Fama–MacBeth premium (`net_issuance`, `asset_growth`, `accruals`)
   are traded in their canonical low-minus-high direction, so the
   signed book's alpha is positive — the two columns are consistent, not in
   conflict.
-- **Carried into Experiment 3.** `gross_profitability` (alpha t = 4.3) is one of
-  the constituents of the multifactor composite; the others come from the
+- **Carried into Experiment 3.** `gross_profitability` (alpha t = 4.4) and `beta`
+  are constituents of the multifactor composite; the others come from the
   software-specific factors of Experiment 2.
 
 ## Outputs
@@ -184,7 +184,6 @@ output/software/
       quintile_returns.csv              # months x Q1..Q5 + Q5-Q1 spread
       quintile_cumulative.png           # 5 cumulative-growth curves (log scale)
       long_short.png                    # the signed Q5-Q1 book's cumulative growth of $1
-    summary.csv                         # per-factor quintile means + long-short stats
     long_short_market_alpha.csv         # per-factor industry-neutral alpha, Sharpe,
     long_short_market_alpha.png         #   avg turnover cost, walk-forward β-neutral &
                                         #   net-of-cost Sharpe (full & 2016+)

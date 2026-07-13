@@ -192,9 +192,7 @@ output/quarter_tertile/tertile_performance.png      the Q3−Q1 book's performan
 output/quarter_tertile/tertile_factor_contribution.png     (tertile counterpart)
 ```
 
-Each `*_performance.png` uses the **same compact row set as Experiment 6's
-liquidity-capped table**
-(`experiment6 - auto components/software/weighted_quality_composite/tertile_liquidity_capped_performance.png`),
+Each `*_performance.png` uses the project's **compact liquidity-capped row set**,
 full sample and 2016+:
 
 1. Industry-neutral α (monthly)

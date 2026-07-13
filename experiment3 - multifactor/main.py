@@ -20,7 +20,7 @@ Each pipeline lives in its own module and already runs standalone via
 (no ``main``) invoked by other experiments to quantify factor redundancy, not a
 standalone pipeline.
 
-Like Experiment 2's ``main.py``, this adds no new analytics -- it just invokes
+Like Experiment 2's ``quarter_position.py``, this adds no new analytics -- it just invokes
 each module's own ``main`` with its default factor set (for
 ``bivariate_gate.py`` that is both default pairs -- revenue_growth_stability and
 return_stability, each gated against gross_profitability).  Each module wires
@@ -33,7 +33,7 @@ Before running the pipelines, this driver also renders ``output/top5_quintile_fa
 the five constituent factors every multifactor book below is built from (the top
 five of Experiment 2's quarterly-repositioned ranking), shown in the project's
 standard long/short alpha-table format -- the Experiment 3 counterpart of
-Experiment 2's ``factor_ranking/quarter_quintile.png``.
+Experiment 2's ``Factor Ranking/quarter_quintile.png``.
 
 Run standalone::
 
@@ -72,7 +72,7 @@ def render_top5_table() -> None:
 
     Reuses ``composite.ranked_factors`` (the shared quarterly top-factor hand-off)
     and Experiment 1's ``render_alpha_table``, so the table is defined identically to
-    Experiment 2's ``factor_ranking/quarter_quintile.png``; each factor's family is
+    Experiment 2's ``Factor Ranking/quarter_quintile.png``; each factor's family is
     tagged with its source subexperiment for provenance."""
     top = C.ranked_factors(C.TOP_N).copy()
     top["family"] = top["family"] + "  [" + top["subexperiment"] + "]"

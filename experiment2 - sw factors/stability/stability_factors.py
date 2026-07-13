@@ -8,8 +8,8 @@ mean), and write a tidy monthly panel to ``stability/factor_panel.csv``.
 
 This module, its driver and its outputs all live in experiment2's
 ``stability/`` subfolder.  It is one of Experiment 2's factor libraries
-(alongside ``sw_factors.py`` -> ``literature/``, ``rd_factors.py`` -> ``RD/``
-and ``skew_factors.py`` -> ``Skew/``).  Like the others it is a **drop-in for
+(alongside ``sw_factors.py`` -> ``literature/``, ``rd_factors.py`` -> ``rd/``
+and ``skew_factors.py`` -> ``skew/``).  Like the others it is a **drop-in for
 Experiment 1's analysis engine**: the quintile sorts, cross-sectional
 (Fama-MacBeth) regressions, long/short books, trading-cost model and every plot
 are reused **verbatim** from

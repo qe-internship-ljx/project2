@@ -8,7 +8,7 @@ write a tidy monthly panel to ``skew/factor_panel.csv``.
 
 This module, its driver and its outputs all live in experiment2's ``skew/``
 subfolder.  It is another factor library for Experiment 2 (alongside
-``sw_factors.py`` -> ``literature/``, ``rd_factors.py`` -> ``RD/`` and
+``sw_factors.py`` -> ``literature/``, ``rd_factors.py`` -> ``rd/`` and
 ``stability_factors.py`` -> ``stability/``).  Like the others it is a **drop-in for Experiment 1's analysis
 engine**: the quintile sorts, cross-sectional (Fama-MacBeth) regressions,
 long/short books, trading-cost model and every plot are reused **verbatim** from

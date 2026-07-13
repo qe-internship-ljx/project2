@@ -20,9 +20,11 @@ log6:  w_i ∝ log(mcap_usd_i)^6     # steep tilt, concentrates on the largest n
 ## Pipelines
 
 Output is grouped by pipeline under `output/capacity_scaling/`
-(`univariate_scaled/`, `bivariate_scaled/`, `composite_scaled/`), plus the 0.5%
+(`univariate_scaled/`, `bivariate_scaled/`), plus the 0.5%
 ownership-capped raw equal-weighted variant under `output/ownership_threshold/` and
 the softmax-conviction half book under `output/confidence_scaling/`.
+(A composite-scaled variant was retired; capacity-aware sizing of the combined
+book is carried out by the Final Portfolio instead.)
 
 **Univariate (`run`).** Re-evaluates **exactly the same factor universe as
 Experiment 2's `quarter_position.py`** (Experiment 1's general factors + every
@@ -54,7 +56,7 @@ Run for both the **quintile** (top/bottom fifth) and **tertile** (top/bottom thi
 sort. Output: two alpha tables —
 
 ```
-output/ownership_threshold/long_short_market_alpha.png           # quintile, equal-weighted, 0.5% cap
+output/ownership_threshold/quintile_long_short_market_alpha.png  # quintile, equal-weighted, 0.5% cap
 output/ownership_threshold/tertile_long_short_market_alpha.png   # tertile,  equal-weighted, 0.5% cap
 ```
 
@@ -66,22 +68,6 @@ each corner. Default pairs: `return_stability × gross_profitability` and
 is benchmarked against its constituents' standalone books and reports the
 largest single-name ownership for a $100M book. Output: one performance table
 per pair under `output/capacity_scaling/bivariate_scaled/`.
-
-**Composite (`run_composite`).** Applies the sqrt weighting to Experiment 3's
-composite z-score book (`composite.py`, imported by path): the top-five factors'
-sign-oriented z-scores are summed into one score and the top / bottom buckets of
-that composite are sqrt-cap-weighted within each leg (everything else — the
-composite construction, factor selection, quarterly-held even-bucket sort,
-orientation and statistics — is the composite driver's own). It is run over both
-of `composite.RANKINGS`, each bucketed the way its constituents were ranked: the
-`quarter_quintile` selection into **quintiles**, the `quarter_tertile` selection
-into **tertiles**. Output: one performance table per ranking, in the same format
-as the bivariate table —
-
-```
-output/capacity_scaling/composite_scaled/quarter_quintile_performance.png   # quintile sort
-output/capacity_scaling/composite_scaled/quarter_tertile_performance.png    # tertile sort
-```
 
 **Confidence (`confidence_scaling.py`).** A conviction tilt rather than a capacity
 one, applied to each factor's **quarter-half** book (long the top half, short the
@@ -104,14 +90,14 @@ output/confidence_scaling/softmax_half_long_short_market_alpha.png   # half, sof
 
 Experiment 1's `factors` / `cost` / `regression` are imported off `sys.path`
 (the generic engine, no library injection); Experiment 2's `quarter_position.py`
-and Experiment 3's `bivariate_gate.py` / `composite.py` are loaded by file path
-for the factor universe, the double-sort mechanics and the composite construction.
+and Experiment 3's `bivariate_gate.py` are loaded by file path
+for the factor universe and the double-sort mechanics.
 This experiment adds **only** the within-leg weighting schemes.
 
 ## Run
 
 ```bash
-python capacity_scaling.py      # univariate (sqrt + log6) + default bivariate pairs + both composite rankings
+python capacity_scaling.py      # univariate (sqrt + log6) + default bivariate pairs + ownership threshold
 python confidence_scaling.py    # softmax(z-score)-weighted quarter-half book
 ```
 

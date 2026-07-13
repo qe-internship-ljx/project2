@@ -37,7 +37,7 @@ Nothing generic is re-implemented:
   ``quintile.py`` and the ``factors.py`` engine are reused *unmodified* through
   the project's dependency-injection convention (register the engine as
   ``sys.modules["factors"]`` before importing the analysis modules, exactly as
-  Experiment 2's ``main.py`` does);
+  Experiment 2's ``monthly_position.py`` does);
 * the long/short book's industry-neutral alpha is measured by Experiment 1's own
   ``regression.market_regression`` / ``industry_monthly_return``, so "alpha" is
   defined identically to every other long/short book in the project;
@@ -156,7 +156,7 @@ def _load_exp1():
     ``quintile`` / ``regression`` (and ``cost``) bind their factor library via
     ``import factors as F`` / ``import cost``; registering the engine and cost
     under those names *first* makes those imports resolve here -- the project's
-    standard dependency-injection convention (cf. Experiment 2's ``main.py``).
+    standard dependency-injection convention (cf. Experiment 2's ``monthly_position.py``).
     """
     engine = _load("factors", EXP1_DIR / "factors.py")
     _load("cost", EXP1_DIR / "cost.py")              # imported by regression.py

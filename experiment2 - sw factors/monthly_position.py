@@ -3,7 +3,8 @@ monthly_position.py
 ===================
 
 Experiment 2 driver **and** the shared monthly-repositioning re-evaluation, in one
-module (the former ``main.py`` + ``tertile.py``).
+module (it consolidates the driver and the tertile/quintile re-evaluation that
+were previously separate).
 
 Two roles
 ---------

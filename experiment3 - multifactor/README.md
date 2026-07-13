@@ -17,7 +17,7 @@ performance is measured (mean, t-stat, Sharpe, and the industry-neutral alpha us
 throughout the project). The constituents themselves are the **top five of
 Experiment 2's quarterly-repositioned ranking** (`quarter_position.ranked_factors`,
 which reads the ranking Experiment 2 persists to
-`factor_ranking/quarter_{label}_ranked.csv`).
+`Factor Ranking/quarter_{label}_ranked.csv`).
 
 There is **no significance gate and no regression model**: the caller passes the
 factor set explicitly, and the factors are combined by standardised aggregation —
@@ -85,7 +85,7 @@ the rest of this section covers the equal-weighted `composite.py`.
 Everything generic is reused from Experiment 1, loaded by path (its folder name
 contains spaces, so it cannot be imported normally) and wired with the project's
 dependency-injection convention — register the engine as `sys.modules["factors"]`
-before importing the analysis modules, exactly as Experiment 2's `main.py` does:
+before importing the analysis modules, exactly as Experiment 2's `monthly_position.py` does:
 
 | Concern | Source | Reuse |
 |---|---|---|
@@ -142,40 +142,41 @@ quarterly-repositioned hand-off the composite is built from; `<word>` below is
 
 The default composite blends Experiment 2's five top-ranked factors — the top
 five of the quarterly-repositioned `quarter_position.ranked_factors` hand-off that
-`factor_momentum.py` also rotates across: `gross_profitability`, `fscore`,
-`rd_stability`, `revenue_growth_stability`, `buyback_quality`. Summing their sign-oriented
-z-scores fuses weakly-correlated quality / R&D-commitment / capital-discipline /
-durability signals into one score, so they carry largely **additive** information.
+`factor_momentum.py` also rotates across: `revenue_growth_stability`,
+`gross_profitability`, `return_stability`, `beta`, `rd_stability`. Summing their
+sign-oriented z-scores fuses weakly-correlated durability / quality / low-risk /
+R&D-commitment signals into one score, so they carry largely **additive**
+information.
 
 α below is the industry-neutral alpha against the **market-cap-weighted** Software &
 Services return; the Q5−Q1 spread, t-stat and Sharpe do not reference the benchmark
 and are unchanged.
 
-| Metric | Full sample (2000–2025, 301 mo) | Past decade (2016+, 120 mo) |
+| Metric | Full sample (2000–2025, 299 mo) | Past decade (2016+, 120 mo) |
 |---|---:|---:|
-| Q5−Q1 mean monthly | +0.937% | +0.847% |
-| t-stat | +4.11 | +2.53 |
-| Sharpe (annualised) | +0.82 | +0.80 |
-| **Industry-neutral α (monthly)** | **+1.155%** | **+1.075%** |
-| **α t-stat** | **+5.34** | **+3.15** |
-| β-neutral Sharpe (walk-forward β) | +1.31 | +1.18 |
+| Q5−Q1 mean monthly | +0.831% | +0.712% |
+| t-stat | +2.73 | +1.81 |
+| Sharpe (annualised) | +0.55 | +0.57 |
+| **Industry-neutral α (monthly)** | **+1.285%** | **+1.193%** |
+| **α t-stat** | **+4.93** | **+3.15** |
+| β-neutral Sharpe (walk-forward β) | +1.40 | +1.27 |
 
 **Takeaways.**
 - **The composite beats every constituent.** Its industry-neutral alpha t-stat
-  (5.34) exceeds each standalone factor's — the strongest constituent,
-  `gross_profitability`, reaches 4.40 (`fscore` 4.11, `rd_stability` 4.08,
-  `buyback_quality` 3.20, `revenue_growth_stability` 3.06) — the diversification benefit of
-  combining weakly-correlated signals (plan §1). The alpha (1.16%/mo) is larger
-  than any single factor's too.
+  (4.93) exceeds each standalone factor's — the strongest constituent,
+  `gross_profitability`, reaches 4.61 (`rd_stability` 3.94,
+  `revenue_growth_stability` 3.45, `return_stability` 3.40, `beta` 3.25) — the
+  diversification benefit of combining weakly-correlated signals (plan §1). The
+  alpha (1.29%/mo) is larger than any single factor's too.
 - **Near-monotonic sort.** Cumulative growth is ordered with Q5 highest and Q1
   lowest across the whole sample (`quintile_cumulative.png`); the ranking power is
   not a tail effect.
 - **Defensive by construction.** The book carries a *negative* industry beta — its
   quality/stability tilt outperforms in down-industry months — so β-hedging lifts
-  the Sharpe from 0.82 to **1.31** (full) / 0.80 to **1.18** (2016+). The hedge β is
+  the Sharpe from 0.55 to **1.40** (full) / 0.57 to **1.27** (2016+). The hedge β is
   re-estimated every month on an **expanding, look-ahead-free window** (walk-forward),
   not one full-sample slope.
-- **Robust across the past decade.** The alpha is essentially unchanged in the
+- **Robust across the past decade.** The alpha is only mildly lower in the
   2016+ re-estimation, not a pre-2010 artifact. (For a genuine walk-forward holdout
   with weights refit quarterly, see the weighted variant below.)
 
@@ -220,40 +221,40 @@ these.
 
 `gross_profitability` carries the dominant, strongly significant premium;
 `revenue_growth_stability` adds a smaller positive tilt. How each weight and its t-stat
-evolve as the window grows is plotted in `beta_paths.png` (weights on top, clustered
+evolve as the window grows is plotted in `beta_path.png` (weights on top, clustered
 t-stats below) — the
-`gross_profitability` weight drifts down from ~0.57%→~0.26% as more (lower-premium)
+`gross_profitability` weight drifts down from ~0.59%→~0.29% as more (lower-premium)
 history accrues, but its clustered t-stat stays firmly above 4 throughout.
 
 ### Walk-forward Q5−Q1 book (2007+)
 
-| Metric | **Walk-forward OOS (2007+, 228 mo)** |
+| Metric | **Walk-forward OOS (2007+, 227 mo)** |
 |---|---:|
-| Mean monthly | +0.620% |
-| t-stat | +3.17 |
-| Sharpe (ann.) | +0.73 |
-| Industry-neutral α (monthly) | +0.721% |
-| α t-stat | **+3.64** |
+| Mean monthly | +0.619% |
+| t-stat | +3.27 |
+| Sharpe (ann.) | +0.75 |
+| Industry-neutral α (monthly) | +0.716% |
+| α t-stat | **+3.72** |
 | β-neutral Sharpe (walk-forward β) | +0.80 |
-| α vs `revenue_growth_stability` book | +0.462% (t = **+3.02**) |
-| α vs `gross_profitability` book | +0.110% (t = +1.08) |
-| Avg monthly cost (turnover) | +0.044% |
+| α vs `revenue_growth_stability` book | +0.444% (t = **+3.02**) |
+| α vs `gross_profitability` book | +0.115% (t = +1.21) |
+| Avg monthly cost (turnover) | +0.037% |
 
 **Takeaways.**
 - **The weighting holds up out-of-sample.** Refitting the premia every month on
   only prior data still yields a significant industry-neutral α of 0.72%/mo
-  (t = 3.64) across the full 228-month walk-forward — no fixed-split cherry-picking.
+  (t = 3.72) across the full 227-month walk-forward — no fixed-split cherry-picking.
 - **Near industry-neutral outright.** The book carries only a small negative
-  industry β (−0.09), so the raw mean (+0.62%/mo, t = 3.17) is itself significant;
+  industry β, so the raw mean (+0.62%/mo, t = 3.27) is itself significant;
   β-hedging (with a walk-forward, expanding-window β) lifts the Sharpe modestly
-  from 0.73 to 0.80.
-- **Stable weights.** `beta_paths.png` shows both weights are smooth and never flip
+  from 0.75 to 0.80.
+- **Stable weights.** `beta_path.png` shows both weights are smooth and never flip
   sign; the ranking is driven throughout by `gross_profitability`, with
   `revenue_growth_stability` a steady secondary tilt.
 - **Adds alpha over the weaker leg, not the stronger.** Regressed on each
   constituent's standalone book, the weighted composite earns a significant
-  +0.46%/mo (t = 3.02) above `revenue_growth_stability` alone, but only an insignificant
-  +0.11%/mo (t = 1.08) above `gross_profitability` alone — so the blend mostly
+  +0.44%/mo (t = 3.02) above `revenue_growth_stability` alone, but only an insignificant
+  +0.12%/mo (t = 1.21) above `gross_profitability` alone — so the blend mostly
   tracks its dominant leg and adds little beyond simply holding it.
 
 Outputs land under `output/weighted/<slug>/`: `beta_path.png` (the expanding-window

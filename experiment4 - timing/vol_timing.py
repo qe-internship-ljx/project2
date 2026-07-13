@@ -53,7 +53,7 @@ Run standalone::
     python vol_timing.py
 
 The single output is one consolidated performance table under
-``experiment4 - timing/output/vol_timing/``:
+``experiment4 - timing/output/``:
 
     vol_timing_quintile_performance.png   ONE consolidated performance table (project house
                                         style, one row per factor -- the vol-timed book):
